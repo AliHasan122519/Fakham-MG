@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1a14">
+<title>استوديو الصوت السعودي</title>
+<style>
+:root{--bg:#0f1a14;--card:#16251d;--line:#25392d;--ink:#eef4ef;--mute:#9bb0a2;--acc:#3ecf8e;--acc2:#c9a24b;--bad:#ff6b6b;--r:14px}
+@media (prefers-color-scheme:light){:root{--bg:#f4f7f4;--card:#fff;--line:#dbe5dd;--ink:#14231a;--mute:#5d7566;--acc:#12805a;--acc2:#8a6a1c;--bad:#c0392b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;padding:0 16px calc(24px + env(safe-area-inset-bottom))}
+header{padding:20px 0 8px}h1{margin:0;font-size:1.35rem}h1 span{color:var(--acc2)}
+.sub{color:var(--mute);font-size:.88rem;margin:2px 0 0}
+nav{display:flex;gap:6px;margin:14px 0;overflow-x:auto}
+nav button{flex:1;min-width:72px;padding:10px 8px;border:1px solid var(--line);background:var(--card);color:var(--mute);border-radius:12px;font:inherit;font-size:.92rem}
+nav button.on{color:var(--ink);border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:12px}
+label{display:block;font-size:.88rem;color:var(--mute);margin:10px 0 4px}
+textarea,select,input[type=text],input[type=file]{width:100%;padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:inherit}
+textarea{min-height:150px;resize:vertical;line-height:1.9}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:420px){.row{grid-template-columns:1fr}}
+input[type=range]{width:100%;accent-color:var(--acc)}
+.btn{width:100%;margin-top:14px;padding:14px;border:0;border-radius:14px;background:var(--acc);color:#04210f;font:inherit;font-weight:700;font-size:1.05rem}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line);margin-top:8px}
+.btn:disabled{opacity:.5}
+.note{font-size:.84rem;color:var(--mute)}.warn{color:var(--acc2)}.err{color:var(--bad);white-space:pre-wrap}
+.bar{height:8px;background:var(--line);border-radius:8px;overflow:hidden;margin-top:10px}.bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .4s}
+audio{width:100%;margin-top:10px}
+.dl{display:flex;gap:8px;margin-top:8px}.dl a{flex:1;text-align:center;padding:11px;border-radius:12px;border:1px solid var(--acc);color:var(--acc);text-decoration:none;font-weight:600}
+.v{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}.v:first-child{border-top:0}
+.pill{font-size:.75rem;padding:2px 9px;border-radius:99px;border:1px solid var(--line);color:var(--mute)}.pill.ok{color:var(--acc);border-color:var(--acc)}.pill.no{color:var(--acc2);border-color:var(--acc2)}
+.hide{display:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>استوديو الصوت <span>السعودي</span></h1>
+  <p class="sub">توليد تعليق صوتي عربي بنماذج مفتوحة ومجانية</p>
+</header>
+<nav id="nav">
+  <button data-t="gen" class="on">توليد</button>
+  <button data-t="voices">الشخصيات</button>
+  <button data-t="hist">السجل</button>
+  <button data-t="sys">الحالة</button>
+</nav>
+
+<section id="t-gen">
+  <div class="card">
+    <label for="text">النص</label>
+    <textarea id="text" placeholder="اكتب النص العربي هنا… الأرقام تُحوَّل إلى كلمات تلقائيًا"></textarea>
+    <div class="note"><span id="cnt">0</span> حرف</div>
+    <div class="row">
+      <div><label for="voice">الصوت</label><select id="voice"></select></div>
+      <div><label for="dialect">اللهجة</label><select id="dialect"></select></div>
+    </div>
+    <div class="row">
+      <div><label for="emotion">المشاعر</label><select id="emotion"></select></div>
+      <div><label for="speed">السرعة: <b id="spv">1.00</b>×</label><input id="speed" type="range" min="0.6" max="1.4" step="0.02" value="1"></div>
+    </div>
+    <div id="dnote" class="note"></div>
+    <div id="vwarn" class="note warn hide"></div>
+    <button class="btn" id="go">🎙️ توليد الصوت</button>
+    <div class="bar hide" id="bar"><i id="barf"></i></div>
+    <div class="note" id="msg"></div>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card hide" id="res">
+    <b>النتيجة</b>
+    <audio id="player" controls preload="auto"></audio>
+    <div class="dl"><a id="dlmp3" download>⬇ MP3</a><a id="dlwav" download>⬇ WAV</a></div>
+    <div class="note" id="rmeta"></div>
+  </div>
+</section>
+
+<section id="t-voices" class="hide">
+  <div class="card"><b>الشخصيات</b><div id="vlist"></div>
+    <p class="note">النموذج يستنسخ صوت <b>مقطع مرجعي</b> (٥–١٠ ثوانٍ، واضح، متحدث واحد) مع نصه الحرفي. ارفع فقط أصواتًا تملك حق استخدامها.</p></div>
+  <div class="card"><b>إضافة / تحديث مقطع مرجعي</b>
+    <label for="nvid">معرّف الصوت (إنجليزي صغير)</label><input id="nvid" type="text" placeholder="مثال: my_voice أو narrator_deep">
+    <label for="nvname">الاسم بالعربية (للصوت الجديد)</label><input id="nvname" type="text" placeholder="مثال: صوتي الخاص">
+    <div class="row">
+      <div><label for="nvg">الجنس</label><select id="nvg"><option value="male">رجالي</option><option value="female">نسائي</option></select></div>
+      <div><label for="nvbase">إعدادات مبنية على</label><select id="nvbase"></select></div>
+    </div>
+    <label for="nvref">المقطع المرجعي (صوتي أو تسجيل)</label><input id="nvref" type="file" accept="audio/*">
+    <label for="nvtxt">النص المنطوق حرفيًا في المقطع</label><input id="nvtxt" type="text">
+    <label><input id="nvauth" type="checkbox"> أُقرّ بأنني أملك حق استخدام هذا الصوت أو لديّ إذن صاحبه</label>
+    <button class="btn" id="nvgo">حفظ الصوت</button>
+    <div class="err" id="nverr"></div><div class="note" id="nvok"></div>
+  </div>
+</section>
+
+<section id="t-hist" class="hide"><div class="card"><b>آخر التوليدات</b><div id="hlist"></div></div></section>
+<section id="t-sys" class="hide"><div class="card"><b>حالة المحرك</b><pre id="sys" class="note" style="white-space:pre-wrap;direction:ltr;text-align:left"></pre></div></section>
+
+<script>
+const $=s=>document.querySelector(s);
+const TOKEN=new URLSearchParams(location.search).get('token')||localStorage.getItem('svs_token')||'';
+if(TOKEN)localStorage.setItem('svs_token',TOKEN);
+const H=TOKEN?{'x-svs-token':TOKEN}:{};
+const q=u=>u+(TOKEN?(u.includes('?')?'&':'?')+'token='+encodeURIComponent(TOKEN):'');
+let DATA={voices:[],dialects:{},emotions:{}};
+async function api(u,o={}){const r=await fetch(u,{...o,headers:{...H,...(o.headers||{})}});
+  if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}return r.json()}
+function opt(sel,items,val){sel.innerHTML=items.map(([v,t])=>`<option value="${v}">${t}</option>`).join('');if(val)sel.value=val}
+async function load(){
+  DATA=await api('/api/voices');
+  opt($('#voice'),DATA.voices.map(v=>[v.id,v.name_ar+(v.reference_source==='own'?'':' — مقطع تجريبي')]));
+  opt($('#dialect'),[['','افتراضي الشخصية'],...Object.entries(DATA.dialects).map(([k,d])=>[k,d.name_ar+(d.native?'':' (تقريبية)')])]);
+  opt($('#emotion'),Object.entries(DATA.emotions).map(([k,e])=>[k,e.name_ar]));
+  opt($('#nvbase'),[['','— لا شيء —'],...DATA.voices.map(v=>[v.id,v.name_ar])]);
+  renderVoices();onVoice();
+}
+function onVoice(){
+  const v=DATA.voices.find(x=>x.id===$('#voice').value)||{};
+  $('#speed').value=v.speed||1;$('#spv').textContent=(+$('#speed').value).toFixed(2);
+  $('#vwarn').classList.toggle('hide',v.reference_source==='own');
+  $('#vwarn').textContent=v.reference_source==='own'?'':'⚠ هذه الشخصية تستخدم مقطعًا تجريبيًا مرفقًا بالنموذج. لصوتك الخاص ارفع مقطعًا تملك حقه من تبويب «الشخصيات».';
+  onDialect();
+}
+function onDialect(){const k=$('#dialect').value||(DATA.voices.find(x=>x.id===$('#voice').value)||{}).default_dialect;
+  const d=DATA.dialects[k];$('#dnote').textContent=d?d.note:''}
+function renderVoices(){
+  $('#vlist').innerHTML=DATA.voices.map(v=>`<div class="v"><div><b>${v.name_ar}</b><div class="note">${v.description||''}</div></div>
+   <div><span class="pill ${v.reference_source==='own'?'ok':'no'}">${v.reference_source==='own'?'مقطعك الخاص':'مقطع تجريبي'}</span>${v.builtin?'':` <button class="pill" onclick="delV('${v.id}')">حذف</button>`}</div></div>`).join('')}
+async function delV(id){if(!confirm('حذف هذا الصوت؟'))return;await api('/api/voices/'+id,{method:'DELETE'});load()}
+$('#voice').onchange=onVoice;$('#dialect').onchange=onDialect;
+$('#speed').oninput=e=>$('#spv').textContent=(+e.target.value).toFixed(2);
+$('#text').oninput=e=>$('#cnt').textContent=e.target.value.length;
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+  ['gen','voices','hist','sys'].forEach(t=>$('#t-'+t).classList.toggle('hide',t!==b.dataset.t));
+  if(b.dataset.t==='hist')hist();if(b.dataset.t==='sys')sys();});
+$('#go').onclick=async()=>{
+  $('#err').textContent='';$('#res').classList.add('hide');$('#go').disabled=true;$('#bar').classList.remove('hide');
+  try{
+    const {job}=await api('/api/generate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+      text:$('#text').value,voice:$('#voice').value,dialect:$('#dialect').value||null,emotion:$('#emotion').value,speed:+$('#speed').value})});
+    for(;;){await new Promise(r=>setTimeout(r,1500));const j=await api('/api/jobs/'+job);
+      $('#barf').style.width=(j.progress*100)+'%';$('#msg').textContent=j.message||'';
+      if(j.state==='error')throw new Error(j.error);
+      if(j.state==='done'){const r=j.result;$('#player').src=q('/files/'+r.files.mp3);
+        $('#dlmp3').href=q('/files/'+r.files.mp3+(TOKEN?'&':'?')+'download=1');$('#dlwav').href=q('/files/'+r.files.wav+(TOKEN?'&':'?')+'download=1');
+        $('#rmeta').textContent=`المدة ${r.seconds}ث · استغرق ${r.took}ث (${r.realtime_factor}× الزمن الحقيقي) · الجهاز: ${r.device}`+(r.dialect_native?'':' · اللهجة تقريبية');
+        $('#res').classList.remove('hide');$('#msg').textContent='تم ✔';break}}
+  }catch(e){$('#err').textContent=e.message}finally{$('#go').disabled=false;setTimeout(()=>$('#bar').classList.add('hide'),800)}};
+$('#nvgo').onclick=async()=>{$('#nverr').textContent='';$('#nvok').textContent='';
+  try{
+    if(!$('#nvauth').checked)throw new Error('يجب الإقرار بحق استخدام الصوت.');
+    const id=$('#nvid').value.trim();const f=$('#nvref').files[0];if(!id||!f)throw new Error('المعرّف والمقطع مطلوبان.');
+    const exists=DATA.voices.some(v=>v.id===id);const fd=new FormData();fd.append('ref',f);fd.append('ref_text',$('#nvtxt').value);
+    if(exists){await api('/api/voices/'+id+'/reference',{method:'POST',body:fd})}
+    else{fd.append('voice_id',id);fd.append('name_ar',$('#nvname').value||id);fd.append('gender',$('#nvg').value);fd.append('base_on',$('#nvbase').value);
+      await api('/api/voices',{method:'POST',body:fd})}
+    $('#nvok').textContent='تم الحفظ ✔';load()}catch(e){$('#nverr').textContent=e.message}};
+async function hist(){const {items}=await api('/api/history');
+  $('#hlist').innerHTML=items.map(i=>`<div class="v"><div><div>${i.text.slice(0,60)}…</div><div class="note">${i.voice} · ${i.seconds}ث</div></div>
+  <a class="pill ok" href="${q('/files/'+i.id+'.mp3')}" target="_blank">استماع</a></div>`).join('')||'<p class="note">لا يوجد سجل بعد.</p>'}
+async function sys(){$('#sys').textContent=JSON.stringify(await api('/api/status'),null,2)}
+load().catch(e=>{$('#err').textContent=e.message});
+</script>
+</body>
+</html>
