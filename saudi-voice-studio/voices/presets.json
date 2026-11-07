@@ -1,0 +1,55 @@
+{
+  "_readme": "الأصوات الجاهزة: كل شخصية = (مقطع مرجعي مُصرَّح به) + إعدادات إلقاء + معالجة صوتية FFmpeg. نموذج NAMAA يستنسخ صوت المقطع المرجعي، لذلك لا يتولد صوت فعلي للشخصية حتى تضع لها مقطعًا في voices/refs أو ترفعه من الواجهة/MCP. الوصف وحده ليس صوتًا.",
+  "dialects": {
+    "najdi":    {"name_ar": "النجدية",           "engine": "najdi", "native": true,  "note": "مدعومة أصليًا: النموذج NAMAA مدرَّب على النجدية (~18 ساعة)."},
+    "hijazi":   {"name_ar": "الحجازية",          "engine": "saudi", "native": false, "note": "تقريبية: نموذج Habibi السعودي العام + مقطع مرجعي حجازي. جودة اللهجة تعتمد على المقطع المرجعي."},
+    "white":    {"name_ar": "السعودية البيضاء",  "engine": "saudi", "native": false, "note": "عربية مبسّطة بنطق سعودي: Habibi السعودي العام."},
+    "khaleeji": {"name_ar": "الخليجية السعودية", "engine": "saudi", "native": false, "note": "تقريبية: Habibi السعودي العام + مقطع مرجعي خليجي."}
+  },
+  "emotions": {
+    "neutral":      {"name_ar": "محايد",   "speed_mul": 1.00, "pitch_st": 0.0,  "gain_db": 0.0,  "pause_s": 0.35, "nfe_add": 0},
+    "enthusiastic": {"name_ar": "حماسي",   "speed_mul": 1.10, "pitch_st": 0.6,  "gain_db": 1.5,  "pause_s": 0.20, "nfe_add": 0},
+    "calm":         {"name_ar": "هادئ",    "speed_mul": 0.92, "pitch_st": -0.3, "gain_db": -1.0, "pause_s": 0.50, "nfe_add": 0},
+    "serious":      {"name_ar": "جاد",     "speed_mul": 0.96, "pitch_st": -0.6, "gain_db": 0.0,  "pause_s": 0.45, "nfe_add": 0},
+    "warm":         {"name_ar": "دافئ",    "speed_mul": 0.95, "pitch_st": 0.0,  "gain_db": 0.0,  "pause_s": 0.40, "nfe_add": 0},
+    "sad":          {"name_ar": "حزين",    "speed_mul": 0.85, "pitch_st": -0.8, "gain_db": -2.0, "pause_s": 0.65, "nfe_add": 0},
+    "dramatic":     {"name_ar": "درامي",   "speed_mul": 0.88, "pitch_st": -0.4, "gain_db": 1.0,  "pause_s": 0.70, "nfe_add": 8}
+  },
+  "voices": [
+    {
+      "id": "narrator_deep", "name_ar": "الراوي السعودي العميق", "gender": "male", "builtin": true,
+      "description": "صوت رجالي عميق ودافئ للسرد والحكايات.",
+      "default_dialect": "najdi", "speed": 0.92, "nfe_step": 32,
+      "fx": {"pitch_st": -1.5, "bass_db": 4, "compress": true, "reverb": 0.12},
+      "ref_audio": null, "ref_text": null
+    },
+    {
+      "id": "promo_energetic", "name_ar": "المعلق الإعلاني الحماسي", "gender": "male", "builtin": true,
+      "description": "إلقاء سريع وحيوي للإعلانات والعروض.",
+      "default_dialect": "najdi", "speed": 1.12, "nfe_step": 32,
+      "fx": {"pitch_st": 0.5, "treble_db": 2, "compress": true},
+      "ref_audio": null, "ref_text": null
+    },
+    {
+      "id": "anchor_formal", "name_ar": "المذيع السعودي الرسمي", "gender": "male", "builtin": true,
+      "description": "نبرة نشرات الأخبار: واضحة، رصينة، متزنة.",
+      "default_dialect": "white", "speed": 1.0, "nfe_step": 32,
+      "fx": {"compress": true, "highpass_hz": 70},
+      "ref_audio": null, "ref_text": null
+    },
+    {
+      "id": "narrator_female", "name_ar": "الراوية السعودية", "gender": "female", "builtin": true,
+      "description": "صوت نسائي دافئ للحكايات والمحتوى التعليمي.",
+      "default_dialect": "najdi", "speed": 0.97, "nfe_step": 32,
+      "fx": {"compress": true, "treble_db": 1, "reverb": 0.08},
+      "ref_audio": null, "ref_text": null
+    },
+    {
+      "id": "documentary_cinematic", "name_ar": "الراوي الوثائقي السينمائي", "gender": "male", "builtin": true,
+      "description": "إلقاء بطيء مهيب مع صدى سينمائي خفيف للأفلام الوثائقية.",
+      "default_dialect": "najdi", "speed": 0.88, "nfe_step": 48,
+      "fx": {"pitch_st": -1.0, "bass_db": 5, "compress": true, "reverb": 0.3},
+      "ref_audio": null, "ref_text": null
+    }
+  ]
+}

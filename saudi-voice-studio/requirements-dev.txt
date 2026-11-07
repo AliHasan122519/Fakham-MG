@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest
+httpx
+faster-whisper   # optional: ASR round-trip check of generated audio (scripts/verify_asr.py)

@@ -1,0 +1,13 @@
+# Free & open source only. Python 3.10-3.13.
+# CPU-only machine? Add:  --extra-index-url https://download.pytorch.org/whl/cpu  (smaller download)
+torch==2.8.0
+torchaudio==2.8.0
+habibi-tts>=0.1.1        # pulls f5-tts + vocos (MIT code; weights are CC-BY-NC-SA, see docs/ENGINES-AND-LICENSES.md)
+mcp>=2.3,<3              # official MCP Python SDK (MCPServer API)
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9
+soundfile>=0.12
+huggingface_hub>=0.23
+numpy
+scipy

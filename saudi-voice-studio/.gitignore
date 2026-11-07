@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+data/
+*.safetensors
+*.pt
+*.ckpt
+.env
+.svs_token
+# Private recordings / reference voices must never be committed:
+voices/refs/*
+!voices/refs/.gitkeep
