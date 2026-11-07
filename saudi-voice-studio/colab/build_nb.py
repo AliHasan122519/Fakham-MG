@@ -1,50 +1,41 @@
-import json
-def code(s): return {"cell_type":"code","metadata":{},"source":s.strip("\n").splitlines(True),"outputs":[],"execution_count":None}
-def md(s): return {"cell_type":"markdown","metadata":{},"source":s.strip("\n").splitlines(True)}
-cells=[
-md("# استوديو الصوت السعودي — Colab المجاني\n**مجاني 100%.** اختر `Runtime ← Change runtime type ← T4 GPU` إن توفر (غير مضمون). لا تُفعّل أي خطة مدفوعة.\n> هذا الدفتر لم يُختبر على Colab من بيئة التطوير؛ إن فشلت خطوة أخبرني بنص الخطأ."),
-code('''
-#@title 1) تثبيت (مرة لكل جلسة)
-import os, subprocess
-REPO = "https://github.com/alihasan122519/fakham-mg.git"   #@param {type:"string"}
-BRANCH = "ccr-0cfe010a-fw0fdc"                            #@param {type:"string"}
-# مستودع خاص؟ أضف سرًّا باسم GH_TOKEN من أيقونة المفتاح في Colab (fine-grained، قراءة فقط).
-try:
-    from google.colab import userdata; tok = userdata.get("GH_TOKEN")
-    REPO = REPO.replace("https://", f"https://{tok}@")
-except Exception: pass
-if not os.path.exists("/content/fakham-mg"):
-    subprocess.run(["git","clone","-b",BRANCH,REPO,"/content/fakham-mg"],check=True)
-%cd /content/fakham-mg/saudi-voice-studio
-!apt-get -qq install -y ffmpeg > /dev/null
-!pip -q install habibi-tts "mcp>=2.3,<3" fastapi uvicorn python-multipart soundfile huggingface_hub scipy
-'''),
-code('''
-#@title 2) حفظ النماذج والبيانات في Google Drive (لتستعيدها بعد توقف الجلسة)
-from google.colab import drive; drive.mount("/content/drive")
-import os; os.makedirs("/content/drive/MyDrive/saudi-voice-studio", exist_ok=True)
-os.environ["SVS_HOME"] = "/content/drive/MyDrive/saudi-voice-studio"   # outputs, history, voices, models
-!python scripts/download_models.py najdi saudi   # يتخطى ما هو محمّل
-'''),
-code('''
-#@title 3) تشغيل الخادم + نفق Cloudflare المجاني (بلا حساب)
-import os, re, secrets, subprocess, time, threading
-os.environ["SVS_TOKEN"] = os.environ.get("SVS_TOKEN") or secrets.token_urlsafe(24)
-os.environ["SVS_HOST"] = "127.0.0.1"
-!wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared
-tun = subprocess.Popen(["cloudflared","tunnel","--url","http://127.0.0.1:8765","--no-autoupdate"],stderr=subprocess.PIPE,text=True)
-url=None
-for line in tun.stderr:
-    m = re.search(r"https://[a-z0-9-]+\\.trycloudflare\\.com", line)
-    if m: url=m.group(0); break
-os.environ["SVS_PUBLIC_URL"] = url
-print("الواجهة :", f"{url}/?token={os.environ['SVS_TOKEN']}")
-print("رابط MCP:", f"{url}/mcp?token={os.environ['SVS_TOKEN']}")
-threading.Thread(target=lambda: subprocess.run(["python","-m","svs.mcp_server","--http"]),daemon=True).start()
-time.sleep(5)
-import torch; print("GPU:", torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else "— CPU فقط")
-'''),
-md("أبقِ هذه الصفحة مفتوحة. إن توقفت الجلسة: أعد تشغيل الخلايا 1→3 (النماذج على Drive، فلا إعادة تنزيل). الرابط يتغير في كل تشغيل؛ حدّث الموصل في Claude."),
-]
-nb={"cells":cells,"metadata":{"accelerator":"GPU","colab":{"provenance":[]},"kernelspec":{"name":"python3","display_name":"Python 3"}},"nbformat":4,"nbformat_minor":5}
-json.dump(nb,open(__import__("os").path.join(__import__("os").path.dirname(__file__),"saudi_voice_studio.ipynb"),"w"),ensure_ascii=False,indent=1)
+"""Builds colab/saudi_voice_studio.ipynb: one self-contained notebook (code embedded, no GitHub access needed)."""
+import base64, io, json, tarfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+INCLUDE = ["svs", "voices/presets.json", "voices/refs/.gitkeep", "web/index.html", "scripts/download_models.py", "requirements.txt"]
+
+
+def payload() -> str:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as t:
+        for item in INCLUDE:
+            p = ROOT / item
+            t.add(p, arcname=item, filter=lambda ti: None if "__pycache__" in ti.name or ti.name.endswith(".pyc") else ti)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def src(s: str):
+    return s.splitlines(True)
+
+
+run_code = (ROOT / "colab/run_studio.py").read_text(encoding="utf-8").replace("__PAYLOAD__", payload())
+md = """# 🎙️ استوديو الصوت السعودي (مجاني 100%)
+
+**من جوال Android فقط، بلا كمبيوتر وبلا تثبيت برامج:**
+
+1. افتح هذا الدفتر في **Chrome** على جوالك (إن ظهرت صفحة مبسطة: قائمة ⋮ ← **موقع سطح المكتب / Desktop site**).
+2. (اختياري، أسرع بكثير) القائمة: **Runtime ← Change runtime type ← T4 GPU**. إن لم يتوفر GPU اتركه CPU — يعمل لكن أبطأ.
+3. اضغط زر ▶ في الخلية أدناه المسماة **تشغيل استوديو الصوت السعودي**، ووافق على إذن Google Drive.
+4. بعد دقائق سيظهر **رابط الواجهة**: افتحه، اكتب النص، ولّد، استمع، نزّل MP3.
+
+> ⚠️ مجاني: لا تُفعّل Colab Pro ولا أي اشتراك. الجلسة تنقطع بعد خمول/ساعات؛ اضغط ▶ من جديد وستعود الأمور سريعًا لأن النماذج على Drive.
+> ⚠️ الأوزان بترخيص **غير تجاري** (CC-BY-NC-SA-4.0).
+> ⚠️ هذا الدفتر لم يُختبر داخل Colab الحقيقي من بيئة التطوير (اختُبر منطقه محليًا). إن ظهر خطأ، انسخ نصه وأرسله."""
+nb = {"cells": [
+    {"cell_type": "markdown", "metadata": {}, "source": src(md)},
+    {"cell_type": "code", "metadata": {"cellView": "form", "id": "run"}, "source": src(run_code), "outputs": [], "execution_count": None},
+], "metadata": {"accelerator": "GPU", "colab": {"provenance": [], "name": "Saudi Voice Studio"},
+                "kernelspec": {"name": "python3", "display_name": "Python 3"}}, "nbformat": 4, "nbformat_minor": 5}
+(ROOT / "colab/saudi_voice_studio.ipynb").write_text(json.dumps(nb, ensure_ascii=False, indent=1), encoding="utf-8")
+print("notebook written:", (ROOT / "colab/saudi_voice_studio.ipynb").stat().st_size // 1024, "KB")
