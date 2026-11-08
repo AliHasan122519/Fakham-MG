@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import base64
 import binascii
+import ipaddress
+import socket
 import sys
 import tempfile
 import urllib.request
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from mcp.server.mcpserver import MCPServer
 
@@ -60,6 +62,8 @@ def generate_voiceover(text: str, voice: str = "narrator_deep", dialect: str = "
     """ولّد تعليقًا صوتيًا. voice: معرّف من list_voices. dialect: najdi|hijazi|white|khaleeji (فارغ = افتراضي الشخصية).
     emotion: neutral|enthusiastic|calm|serious|warm|sad|dramatic. speed: 0 = افتراضي الشخصية، أو 0.6-1.4.
     يعيد روابط MP3/WAV عند الاكتمال، وإلا job id لاستعلام get_job."""
+    if jobs.running_count() >= jobs.MAX_RUNNING:
+        return {"state": "error", "error": "توجد مهام توليد قيد التنفيذ؛ انتظر حتى تنتهي ثم أعد المحاولة."}
     jid = jobs.start(text=text, voice_id=voice, dialect=dialect or None, emotion=emotion,
                      speed=speed or None, fmt="both")
     return _job_view(jobs.wait(jid, max(0, min(wait_seconds, 110))))
@@ -98,18 +102,42 @@ def create_voice(voice_id: str, name_ar: str, gender: str = "male", description:
     return {"created": v["id"], "reference_source": voices.reference_for(v, v["default_dialect"])[2]}
 
 
+MAX_AUDIO = 25 * 1024 * 1024
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):  # a redirect could point at an internal address
+        return None
+
+
+def _public_https(url: str) -> None:
+    """SSRF guard: https only, host must resolve ONLY to public addresses (no loopback/metadata/private)."""
+    u = urlparse(url)
+    if u.scheme != "https" or not u.hostname:
+        raise ValueError("audio_url يجب أن يبدأ بـ https://")
+    for info in socket.getaddrinfo(u.hostname, u.port or 443, proto=socket.IPPROTO_TCP):
+        if not ipaddress.ip_address(info[4][0]).is_global:
+            raise ValueError("audio_url يشير إلى عنوان داخلي/غير عام — مرفوض.")
+
+
 def _fetch_audio(audio_base64: str, audio_url: str, td: str) -> Path:
     dst = Path(td) / "ref_in"
     if audio_base64:
+        payload = audio_base64.split(",")[-1]
+        if len(payload) > MAX_AUDIO * 4 // 3 + 16:
+            raise ValueError("المقطع كبير جدًا (الحد 25MB).")
         try:
-            dst.write_bytes(base64.b64decode(audio_base64.split(",")[-1], validate=False))
+            dst.write_bytes(base64.b64decode(payload, validate=True))
         except (binascii.Error, ValueError) as e:
             raise ValueError(f"base64 غير صالح: {e}")
     elif audio_url:
-        if not audio_url.startswith(("https://", "http://")):
-            raise ValueError("audio_url يجب أن يبدأ بـ https://")
-        with urllib.request.urlopen(audio_url, timeout=60) as r, dst.open("wb") as f:  # noqa: S310
-            f.write(r.read(30 * 1024 * 1024))
+        _public_https(audio_url)
+        opener = urllib.request.build_opener(_NoRedirect)
+        with opener.open(audio_url, timeout=30) as r:  # noqa: S310
+            data = r.read(MAX_AUDIO + 1)
+        if len(data) > MAX_AUDIO:
+            raise ValueError("المقطع كبير جدًا (الحد 25MB).")
+        dst.write_bytes(data)
     else:
         raise ValueError("أعطِ audio_base64 أو audio_url.")
     return dst
@@ -220,7 +248,9 @@ def _transport_security():
 def main() -> None:
     if "--http" in sys.argv:
         import uvicorn
-        uvicorn.run(build_http_app(), host=config.HOST, port=config.PORT, log_level="info")
+        config.require_safe_bind()
+        # access_log=False: the access log would print every request URL, including ?token=...
+        uvicorn.run(build_http_app(), host=config.HOST, port=config.PORT, log_level="warning", access_log=False)
     else:
         mcp.run()
 

@@ -37,3 +37,9 @@ PORT = int(os.environ.get("SVS_PORT", "8765"))
 
 for _d in (OUTPUTS, USER_VOICES, USER_REFS, MODEL_DIR):
     _d.mkdir(parents=True, exist_ok=True)
+
+
+def require_safe_bind() -> None:
+    """Never serve a non-loopback address without a secret token."""
+    if not TOKEN and HOST not in ("127.0.0.1", "localhost", "::1"):
+        raise SystemExit("رفض التشغيل: SVS_HOST غير محلي بدون SVS_TOKEN. عيّن SVS_TOKEN أو أبقِ SVS_HOST=127.0.0.1")

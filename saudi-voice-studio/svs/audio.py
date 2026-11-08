@@ -70,8 +70,21 @@ def duration(path: Path) -> float:
     return info.frames / info.samplerate
 
 
+MAX_REF_BYTES = 25 * 1024 * 1024
+
+
 def prepare_reference(src: Path, dst: Path, max_seconds: float = 10.0) -> Path:
-    """Convert any uploaded clip to mono 24 kHz WAV, trimmed to <= max_seconds, loudness-normalised."""
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-t", str(max_seconds), "-ac", "1",
-                    "-ar", str(SR), "-af", "loudnorm=I=-20:TP=-2", str(dst)], check=True)
+    """Convert an uploaded clip to mono 24 kHz WAV (<= max_seconds, loudness-normalised).
+
+    Security: the untrusted file is fed through stdin and ffmpeg is limited to the `pipe` protocol, so a
+    crafted playlist (HLS/concat) cannot make ffmpeg read other local files or fetch network URLs.
+    """
+    data = Path(src).read_bytes()
+    if len(data) > MAX_REF_BYTES:
+        raise ValueError("المقطع المرجعي كبير جدًا (الحد 25MB).")
+    r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-protocol_whitelist", "pipe", "-t", "60", "-i", "pipe:0",
+                        "-t", str(max_seconds), "-vn", "-sn", "-dn", "-ac", "1", "-ar", str(SR),
+                        "-af", "loudnorm=I=-20:TP=-2", str(dst)], input=data, capture_output=True, timeout=120)
+    if r.returncode != 0 or not Path(dst).is_file():
+        raise ValueError("تعذّر قراءة المقطع الصوتي (صيغة غير صالحة؟).")
     return dst

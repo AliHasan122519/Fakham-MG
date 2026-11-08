@@ -11,6 +11,13 @@ from . import audio, config
 _ID_RE = re.compile(r"^[a-z0-9_\-]{2,40}$")
 
 
+def check_id(voice_id: str) -> str:
+    """Voice ids become file names: only [a-z0-9_-]{2,40} is accepted (blocks '../' traversal)."""
+    if not isinstance(voice_id, str) or not _ID_RE.match(voice_id):
+        raise ValueError("المعرّف: أحرف إنجليزية صغيرة وأرقام و _ - فقط (2-40).")
+    return voice_id
+
+
 def _presets() -> dict:
     return json.loads(config.PRESETS.read_text(encoding="utf-8"))
 
@@ -87,6 +94,7 @@ def list_voices() -> list[dict]:
 
 
 def get_voice(voice_id: str) -> dict:
+    check_id(voice_id)
     for v in list_voices():
         if v["id"] == voice_id:
             full = dict(v)
@@ -110,8 +118,11 @@ def reference_for(v: dict, dialect: str) -> tuple[Path, str, str]:
 
 def save_reference(voice_id: str, src_audio: Path, transcript: str) -> Path:
     """Attach an authorised reference clip (5-10 s) + its exact transcript to a voice."""
+    check_id(voice_id)
     if not transcript.strip():
         raise ValueError("النص المنطوق في المقطع المرجعي (ref_text) مطلوب وبدقة.")
+    if len(transcript) > 1000:
+        raise ValueError("النص المرجعي طويل جدًا (الحد 1000 حرف).")
     dst = config.USER_REFS / f"{voice_id}.wav"
     audio.prepare_reference(Path(src_audio), dst)
     (config.USER_REFS / f"{voice_id}.txt").write_text(transcript.strip(), encoding="utf-8")
@@ -121,8 +132,7 @@ def save_reference(voice_id: str, src_audio: Path, transcript: str) -> Path:
 def create_voice(voice_id: str, name_ar: str, *, gender: str = "male", description: str = "",
                  default_dialect: str = "najdi", speed: float = 1.0, nfe_step: int = 32,
                  fx: dict | None = None, base_on: str | None = None) -> dict:
-    if not _ID_RE.match(voice_id):
-        raise ValueError("المعرّف: أحرف إنجليزية صغيرة وأرقام و _ - فقط (2-40).")
+    check_id(voice_id)
     if default_dialect not in dialects():
         raise ValueError(f"لهجة غير معروفة: {default_dialect}")
     base = {}
@@ -141,6 +151,7 @@ def create_voice(voice_id: str, name_ar: str, *, gender: str = "male", descripti
 
 
 def delete_voice(voice_id: str) -> None:
+    check_id(voice_id)
     p = config.USER_VOICES / f"{voice_id}.json"
     if not p.is_file():
         raise KeyError("يمكن حذف الأصوات التي أنشأتها فقط.")

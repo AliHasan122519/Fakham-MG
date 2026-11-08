@@ -96,6 +96,7 @@ audio{width:100%;margin-top:10px}
 
 <script>
 const $=s=>document.querySelector(s);
+const esc=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const TOKEN=new URLSearchParams(location.search).get('token')||localStorage.getItem('svs_token')||'';
 if(TOKEN)localStorage.setItem('svs_token',TOKEN);
 const H=TOKEN?{'x-svs-token':TOKEN}:{};
@@ -103,7 +104,7 @@ const q=u=>u+(TOKEN?(u.includes('?')?'&':'?')+'token='+encodeURIComponent(TOKEN)
 let DATA={voices:[],dialects:{},emotions:{}};
 async function api(u,o={}){const r=await fetch(u,{...o,headers:{...H,...(o.headers||{})}});
   if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}return r.json()}
-function opt(sel,items,val){sel.innerHTML=items.map(([v,t])=>`<option value="${v}">${t}</option>`).join('');if(val)sel.value=val}
+function opt(sel,items,val){sel.innerHTML=items.map(([v,t])=>`<option value="${esc(v)}">${esc(t)}</option>`).join('');if(val)sel.value=val}
 async function load(){
   DATA=await api('/api/voices');
   opt($('#voice'),DATA.voices.map(v=>[v.id,v.name_ar+(v.reference_source==='own'?'':' — مقطع تجريبي')]));
@@ -122,8 +123,9 @@ function onVoice(){
 function onDialect(){const k=$('#dialect').value||(DATA.voices.find(x=>x.id===$('#voice').value)||{}).default_dialect;
   const d=DATA.dialects[k];$('#dnote').textContent=d?d.note:''}
 function renderVoices(){
-  $('#vlist').innerHTML=DATA.voices.map(v=>`<div class="v"><div><b>${v.name_ar}</b><div class="note">${v.description||''}</div></div>
-   <div><span class="pill ${v.reference_source==='own'?'ok':'no'}">${v.reference_source==='own'?'مقطعك الخاص':'مقطع تجريبي'}</span>${v.builtin?'':` <button class="pill" onclick="delV('${v.id}')">حذف</button>`}</div></div>`).join('')}
+  $('#vlist').innerHTML=DATA.voices.map(v=>`<div class="v"><div><b>${esc(v.name_ar)}</b><div class="note">${esc(v.description||'')}</div></div>
+   <div><span class="pill ${v.reference_source==='own'?'ok':'no'}">${v.reference_source==='own'?'مقطعك الخاص':'مقطع تجريبي'}</span>${v.builtin?'':` <button class="pill" data-del="${esc(v.id)}">حذف</button>`}</div></div>`).join('')}
+document.addEventListener('click',e=>{const id=e.target.dataset&&e.target.dataset.del;if(id)delV(id)});
 async function delV(id){if(!confirm('حذف هذا الصوت؟'))return;await api('/api/voices/'+id,{method:'DELETE'});load()}
 $('#voice').onchange=onVoice;$('#dialect').onchange=onDialect;
 $('#speed').oninput=e=>$('#spv').textContent=(+e.target.value).toFixed(2);
@@ -155,8 +157,8 @@ $('#nvgo').onclick=async()=>{$('#nverr').textContent='';$('#nvok').textContent='
       await api('/api/voices',{method:'POST',body:fd})}
     $('#nvok').textContent='تم الحفظ ✔';load()}catch(e){$('#nverr').textContent=e.message}};
 async function hist(){const {items}=await api('/api/history');
-  $('#hlist').innerHTML=items.map(i=>`<div class="v"><div><div>${i.text.slice(0,60)}…</div><div class="note">${i.voice} · ${i.seconds}ث</div></div>
-  <a class="pill ok" href="${q('/files/'+i.id+'.mp3')}" target="_blank">استماع</a></div>`).join('')||'<p class="note">لا يوجد سجل بعد.</p>'}
+  $('#hlist').innerHTML=items.map(i=>`<div class="v"><div><div>${esc(i.text.slice(0,60))}…</div><div class="note">${esc(i.voice)} · ${esc(i.seconds)}ث</div></div>
+  <a class="pill ok" href="${esc(q('/files/'+i.id+'.mp3'))}" target="_blank">استماع</a></div>`).join('')||'<p class="note">لا يوجد سجل بعد.</p>'}
 async function sys(){$('#sys').textContent=JSON.stringify(await api('/api/status'),null,2)}
 load().catch(e=>{$('#err').textContent=e.message});
 </script>

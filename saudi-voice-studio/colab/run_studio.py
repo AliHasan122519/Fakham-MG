@@ -2,6 +2,10 @@
 #@markdown اضغط ▶ مرة واحدة وانتظر (أول مرة ~5–10 دقائق للتنزيل، وبعدها أسرع لأن النماذج على Drive).
 #@markdown مجاني بالكامل — لا تُفعّل أي اشتراك ولا تُدخل بطاقة.
 DOWNLOAD_SAUDI_MODEL = True  #@param {type:"boolean"}
+USE_GOOGLE_DRIVE = True  #@param {type:"boolean"}
+#@markdown ⚠️ ربط Drive يمنح بيئة التشغيل وصولًا لكل ملفات Drive لديك (Colab لا يسمح بربط مجلد واحد فقط). الكود يكتب داخل `saudi-voice-studio/` فقط، لكن إن كنت لا تريد هذا الوصول أزل العلامة (ستُعاد تنزيلات النماذج ~2.6GB كل جلسة ولا تُحفظ الشخصيات).
+ALLOW_UNVERIFIED_CLOUDFLARED = False  #@param {type:"boolean"}
+#@markdown (اتركه معطّلًا: لا يُشغَّل cloudflared إلا إذا طابقت بصمته SHA-256 المثبّتة.)
 #@markdown (النموذج الثاني للهجات الحجازية/البيضاء/الخليجية، ~1.3GB إضافية على Drive. النجدية لا تحتاجه.)
 
 import base64, io, json, os, re, secrets, subprocess, sys, tarfile, threading, time, urllib.request
@@ -9,6 +13,9 @@ from pathlib import Path
 
 PAYLOAD = "__PAYLOAD__"          # الكود مضمَّن هنا: لا حاجة لـ GitHub ولا لأوامر يدوية
 PORT = 8765
+# cloudflared: بصمة SHA-256 للإصدار الذي فُحص (linux-amd64). أي ملف آخر يُرفض.
+CF_URL = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
+CF_SHA256 = "1f99fb518b83dec2ba8d870a7cc991d82a77e6196295a3d2754ba17ab9f91872"
 IN_COLAB = "google.colab" in sys.modules
 APP = Path(os.environ.get("SVS_APP_DIR", "/content/saudi-voice-studio"))
 
@@ -25,12 +32,18 @@ def step(n, msg):
 step(1, "تجهيز ملفات المشروع…")
 APP.mkdir(parents=True, exist_ok=True)
 with tarfile.open(fileobj=io.BytesIO(base64.b64decode(PAYLOAD)), mode="r:gz") as t:
-    t.extractall(APP, filter="data") if sys.version_info >= (3, 12) else t.extractall(APP)
+    for ti in t.getmembers():   # لا مسارات مطلقة ولا ".." ولا روابط ولا أجهزة
+        if ti.name.startswith("/") or ".." in Path(ti.name).parts or not (ti.isfile() or ti.isdir()):
+            raise SystemExit(f"رُفض: عنصر غير آمن في الحزمة: {ti.name}")
+    if hasattr(tarfile, "data_filter"):
+        t.extractall(APP, filter="data")
+    else:
+        raise SystemExit("إصدار بايثون قديم: لا يدعم فك الضغط الآمن.")
 
-# 2) Google Drive (حفظ النماذج والبيانات)
-step(2, "ربط Google Drive لحفظ النماذج (وافق على نافذة الإذن)…")
+# 2) Google Drive (حفظ النماذج والبيانات) — اختياري
+step(2, "ربط Google Drive لحفظ النماذج (وافق على نافذة الإذن)…" if USE_GOOGLE_DRIVE else "بدون Drive: التخزين مؤقت في الجلسة.")
 home = None
-if IN_COLAB:
+if IN_COLAB and USE_GOOGLE_DRIVE:
     try:
         from google.colab import drive
         drive.mount("/content/drive")
@@ -39,18 +52,17 @@ if IN_COLAB:
         say(f"⚠️ تعذّر ربط Drive ({e}). سأحفظ مؤقتًا في الجلسة؛ سيُعاد التنزيل في كل مرة.")
 home = home or Path(os.environ.get("SVS_HOME", "/content/svs-data"))
 home.mkdir(parents=True, exist_ok=True)
-tok_file = home / ".token"
-if not tok_file.exists():
-    tok_file.write_text(secrets.token_urlsafe(24))
-TOKEN = tok_file.read_text().strip()
+# رمز سري جديد في كل تشغيل، ولا يُحفظ على Drive أبدًا (تسريب الرابط القديم لا يفيد أحدًا بعد انتهاء الجلسة)
+TOKEN = secrets.token_urlsafe(32)
 
 # 3) المكتبات
 step(3, "تثبيت المكتبات المجانية (pip + ffmpeg)…")
 if os.environ.get("SVS_SKIP_INSTALL") != "1":
     if subprocess.run(["which", "ffmpeg"], capture_output=True).returncode != 0:
         subprocess.run("apt-get -qq update && apt-get -qq install -y ffmpeg", shell=True, check=False)
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "habibi-tts", "mcp>=2.3,<3", "fastapi", "uvicorn",
-                    "python-multipart", "soundfile", "huggingface_hub", "scipy"], check=True)
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "habibi-tts==0.1.1", "mcp==2.3.0", "fastapi==0.162.2",
+                    "uvicorn==0.54.0", "python-multipart==0.0.33", "soundfile==0.14.0", "huggingface_hub==1.33.0",
+                    "scipy==1.18.1"], check=True)   # إصدارات مثبّتة هي التي اختُبرت
 
 # 4) الجهاز + النماذج
 step(4, "فحص GPU وتنزيل النماذج إلى Drive…")
@@ -60,7 +72,10 @@ try:
     say(f"   الجهاز: {'GPU — ' + torch.cuda.get_device_name(0) if GPU else 'CPU فقط (بطيء ~10× مدة الصوت). لتجربة GPU: Runtime ← Change runtime type ← T4 GPU، ثم أعد التشغيل.'}")
 except Exception:
     GPU = False
-env = {**os.environ, "SVS_HOME": str(home), "SVS_TOKEN": TOKEN, "SVS_HOST": "127.0.0.1", "SVS_PORT": str(PORT)}
+# نمرّر للعمليات الفرعية متغيرات البيئة غير السرية فقط (لا مفاتيح/رموز/كلمات مرور من بيئتك)
+_SECRETISH = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)", re.I)
+env = {k: v for k, v in os.environ.items() if not _SECRETISH.search(k)}
+env.update({"SVS_HOME": str(home), "SVS_TOKEN": TOKEN, "SVS_HOST": "127.0.0.1", "SVS_PORT": str(PORT)})
 which = ["najdi"] + (["saudi"] if DOWNLOAD_SAUDI_MODEL else [])
 subprocess.run([sys.executable, str(APP / "scripts/download_models.py"), *which], check=True, env=env, cwd=APP)
 
@@ -70,9 +85,18 @@ public = None
 cf = Path("/tmp/cloudflared")
 tunnel_log = Path("/tmp/cloudflared.log")
 try:
+    import hashlib
+    def _sha(p):
+        return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+    if cf.exists() and _sha(cf) != CF_SHA256 and not ALLOW_UNVERIFIED_CLOUDFLARED:
+        cf.unlink()
     if not cf.exists():
-        urllib.request.urlretrieve("https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64", cf)
-        cf.chmod(0o755)
+        urllib.request.urlretrieve(CF_URL, cf)
+    if _sha(cf) != CF_SHA256 and not ALLOW_UNVERIFIED_CLOUDFLARED:
+        cf.unlink()
+        raise RuntimeError("بصمة cloudflared لا تطابق المثبّتة (ربما صدر إصدار جديد). رفضتُ تشغيله حفاظًا على الأمان. "
+                           "إن كنت تثق بالمصدر فعّل ALLOW_UNVERIFIED_CLOUDFLARED.")
+    cf.chmod(0o755)
     tunnel_log.write_text("")
     subprocess.Popen([str(cf), "tunnel", "--url", f"http://127.0.0.1:{PORT}", "--no-autoupdate"],
                      stdout=open(tunnel_log, "a"), stderr=subprocess.STDOUT)
@@ -127,7 +151,9 @@ if public:
     say("✅ الخادم يعمل. اضغط مطوّلًا على الرابط لنسخه أو افتحه:")
     say(f"\n🎙️ رابط الواجهة (افتحه في متصفح الجوال):\n{ui}")
     say(f"\n🔌 رابط MCP (للصقه في موصل Claude — اختياري):\n{mcp_url}")
-    say("\n🔒 الرابطان يحتويان رمزك السري — لا تشاركهما.")
+    say("\n🔒 الرابطان يحتويان رمزك السري ومن يملكهما يستطيع استخدام الاستوديو (وموارد Colab الخاصة بك).")
+    say("   • لا تشاركهما، ولا تحفظ نسخة من الدفتر «مع المخرجات» (File ← Save a copy) ولا تشارك الدفتر وهو يعرضهما.")
+    say("   • الرمز يتجدد كل تشغيل؛ اضغط «Disconnect and delete runtime» لإبطال الرابط فورًا.")
 else:
     say("✅ الخادم يعمل لكن بلا رابط عام (فشل النفق). استخدم رابط Colab الداخلي أدناه للواجهة فقط؛ ربط Claude غير متاح الآن.")
     if IN_COLAB:

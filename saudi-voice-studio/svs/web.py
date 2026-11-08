@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import hmac
-import shutil
 import tempfile
 from pathlib import Path
 
@@ -14,6 +13,30 @@ from . import config, history, jobs, studio, voices
 from .engine import ENGINE, EngineUnavailable
 
 app = FastAPI(title="Saudi Voice Studio", docs_url=None, redoc_url=None)
+MAX_UPLOAD = 25 * 1024 * 1024
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Referrer-Policy"] = "no-referrer"          # the token lives in the URL: never leak it via Referer
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Cache-Control"] = "no-store"
+    resp.headers["Content-Security-Policy"] = (
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; "
+        "media-src 'self' blob:; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'")
+    return resp
+
+
+def _save_upload(up: UploadFile, dst: Path) -> None:
+    size = 0
+    with dst.open("wb") as f:
+        while chunk := up.file.read(1024 * 1024):
+            size += len(chunk)
+            if size > MAX_UPLOAD:
+                raise ValueError("الملف كبير جدًا (الحد 25MB).")
+            f.write(chunk)
 WEB = config.ROOT / "web"
 
 
@@ -56,6 +79,8 @@ def api_voices():
 
 @app.post("/api/generate", dependencies=[Depends(auth)])
 def api_generate(req: GenReq):
+    if jobs.running_count() >= jobs.MAX_RUNNING:
+        raise HTTPException(429, "توجد مهام توليد قيد التنفيذ؛ انتظر حتى تنتهي.")
     jid = jobs.start(text=req.text, voice_id=req.voice, dialect=req.dialect, emotion=req.emotion,
                      speed=req.speed, fmt=req.format)
     return {"job": jid}
@@ -93,9 +118,8 @@ def api_create_voice(voice_id: str = Form(...), name_ar: str = Form(...), gender
                                 default_dialect=default_dialect, speed=speed, base_on=base_on or None)
         if ref is not None and ref.filename:
             with tempfile.TemporaryDirectory() as td:
-                tmp = Path(td) / (ref.filename or "ref")
-                with tmp.open("wb") as f:
-                    shutil.copyfileobj(ref.file, f)
+                tmp = Path(td) / "ref_in"
+                _save_upload(ref, tmp)
                 voices.save_reference(voice_id, tmp, ref_text)
         v = voices.get_voice(voice_id)
         return {k: x for k, x in v.items() if not k.startswith("_")}
@@ -108,9 +132,8 @@ def api_set_ref(voice_id: str, ref_text: str = Form(...), ref: UploadFile = File
     try:
         voices.get_voice(voice_id)
         with tempfile.TemporaryDirectory() as td:
-            tmp = Path(td) / (ref.filename or "ref")
-            with tmp.open("wb") as f:
-                shutil.copyfileobj(ref.file, f)
+            tmp = Path(td) / "ref_in"
+            _save_upload(ref, tmp)
             voices.save_reference(voice_id, tmp, ref_text)
         return {"ok": True}
     except (ValueError, KeyError) as e:
@@ -128,7 +151,8 @@ def api_delete_voice(voice_id: str):
 
 def main() -> None:
     import uvicorn
-    uvicorn.run(app, host=config.HOST, port=config.PORT)
+    config.require_safe_bind()
+    uvicorn.run(app, host=config.HOST, port=config.PORT, access_log=False)  # access log would print ?token=
 
 
 if __name__ == "__main__":

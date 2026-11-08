@@ -10,9 +10,19 @@ from .engine import EngineUnavailable
 
 JOBS: dict[str, dict] = {}
 _LOCK = threading.Lock()
+MAX_RUNNING = 2     # a leaked link must not be able to queue unlimited work on your GPU/CPU
+MAX_KEPT = 200
+
+
+def running_count() -> int:
+    return sum(1 for j in JOBS.values() if j["state"] == "running")
 
 
 def start(**kwargs) -> str:
+    with _LOCK:
+        if len(JOBS) >= MAX_KEPT:
+            for k in [k for k, j in JOBS.items() if j["state"] != "running"][: MAX_KEPT // 2]:
+                JOBS.pop(k, None)
     jid = uuid.uuid4().hex[:10]
     JOBS[jid] = {"id": jid, "state": "running", "progress": 0.0, "message": "بدء", "started": time.time()}
 
