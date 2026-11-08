@@ -283,7 +283,19 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
     audio.write_wav(d / "mix_in.wav", mix)
     progress(0.90, "المعالجة الصوتية النهائية")
     profile = audio.spectral_profile(mix)
-    af = audio.master_chain(v.get("fx"), profile, clean=clean)
+    ref_eq = None
+    if plan.get("lock_identity"):
+        # Your own voice: match the finished audio's tonal balance (warmth/brightness) to YOUR reference clip.
+        try:
+            ref0, _t0, _s0 = voices.reference_for(v, plan["dialect"], None)
+            rw, rsr = sf.read(str(ref0), dtype="float32")
+            rw = rw if rw.ndim == 1 else rw[:, 0]
+            if rsr != audio.SR:
+                rw = np.interp(np.linspace(0, len(rw) - 1, int(len(rw) * audio.SR / rsr)), np.arange(len(rw)), rw).astype(np.float32)
+            ref_eq = audio.reference_eq(mix, rw)
+        except Exception:
+            ref_eq = None
+    af = audio.master_chain(v.get("fx"), profile, clean=clean, ref_eq=ref_eq)
     audio.process(d / "raw_in.wav", d / "raw.wav", None, audio.leveled_only())
     audio.process(d / "mix_in.wav", d / "master.wav", None, af)
     audio.encode(d / "raw.wav", d / "raw.mp3")
@@ -329,7 +341,7 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
             "intelligibility_compare": cmp_intel, "created": time.time(), "plan": plan, "segments": seg_meta,
             "files": {"master_mp3": "master.mp3", "master_wav": "master.wav", "raw_mp3": "raw.mp3",
                       "segments": {s["id"]: f"seg_{s['id']}.mp3" for s in segs}},
-            "metrics": {"before": m_raw, "after": m_master}, "profile": profile, "mastering": af,
+            "metrics": {"before": m_raw, "after": m_master}, "profile": profile, "mastering": af, "ref_eq": ref_eq,
             "device": ENGINE.device if ENGINE.device != "uninitialised" else ENGINE.pick_device(),
             "engine": engine, "dialect_native": dcfg["native"], "dialect_note": dcfg["note"],
             "warnings": warnings, "took_s": round(took, 1), "realtime_factor": round(took / max(secs, 0.1), 1),

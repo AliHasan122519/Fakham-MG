@@ -209,3 +209,19 @@ def test_expressive_engine_disabled_by_default_and_mapping():
     p = planmod.build("جملة تجريبية.", voice="narrator_deep", dialect="msa")
     with pytest.raises(render.RenderError):
         render.render(p, synth_fn=fake_synth)
+
+
+def test_reference_eq_moves_spectrum_toward_reference_and_is_clamped():
+    rng = np.random.default_rng(0)
+    sr = 24000
+    t = np.arange(sr * 3) / sr
+    base = sum(np.sin(2 * np.pi * 150 * h * t) / h for h in range(1, 40)) * (np.sin(2 * np.pi * 3 * t) ** 2)
+    thin = audio.ffmpeg_wave((0.2 * base).astype(np.float32), "highpass=f=400")           # no body below 400 Hz
+    full = (0.2 * base).astype(np.float32)
+    eq = audio.reference_eq(thin, full)
+    gains = {int(f.split("f=")[1].split(":")[0]): float(f.split("g=")[1]) for f in eq}
+    assert gains.get(125, 0) > 0 and gains[125] <= 4.0 and all(abs(g) <= 4.0 for g in gains.values())
+    before = np.abs(audio._band_levels(thin, sr) - audio._band_levels(full, sr)).mean()
+    fixed = audio.ffmpeg_wave(thin, ",".join(eq))
+    after = np.abs(audio._band_levels(fixed, sr) - audio._band_levels(full, sr)).mean()
+    assert after < before
