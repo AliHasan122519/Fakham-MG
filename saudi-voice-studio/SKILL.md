@@ -14,7 +14,7 @@ description: استوديو تعليق صوتي سعودي مجاني ومفتو
 
 ## سير العمل الموصى به (أفضل جودة)
 1. `engine_status` ثم `list_voices` (اختر الشخصية واللهجة).
-2. `analyze_text(text, voice, dialect, style)` ← يعيد `plan` + ملخص (عاطفة/شدة/«لماذا»/كلمات ملتبسة).
+2. **`smart_enhance(text, voice, dialect, style)`** (التحسين الذكي) ← خطة + لكل جملة: الأصلي/المصحَّح/المشكول، العاطفة وسببها، والكلمات التي تحتاج اختيارًا. (`analyze_text` الأخف يبقى متاحًا.)
 3. **راجع الخطة بنفسك**: صحّح `emotion`/`intensity` لكل جملة من المعنى (الاكتشاف الآلي معجم وقواعد)، واضبط `spoken` للكلمات الملتبسة/الأسماء (أو `set_pronunciation`).
 4. `generate_voiceover(plan_json=<الخطة المعدّلة>)`، أو للبساطة `generate_voiceover(text=..., emotion="auto")`.
 5. إن لم تنتهِ المهمة فاستعلم بـ `get_job`. سلّم المستخدم `mp3_url` (+ `before_mp3_url` للمقارنة).
@@ -24,6 +24,9 @@ description: استوديو تعليق صوتي سعودي مجاني ومفتو
 ## الأنماط
 narration سرد · ad إعلان · news نشرة · documentary وثائقي · story حكاية · conversation حوار.
 المشاعر: neutral joy sadness excitement calm confidence grandeur empathy suspense warning formal.
+
+## المقاطع المرجعية
+قبل `set_voice_reference`/`clone_voice` استخدم **`analyze_reference`** لفحص المقطع (ضجيج/قطع/كلام/تطابق النص). المقاطع التالفة تُرفض برسالة؛ أبلغ المستخدم بالسبب بدل إعادة المحاولة. اترك `transcript` فارغًا ليُفرَّغ آليًا وراجعه.
 
 ## الشخصيات
 `narrator_deep` · `promo_energetic` · `anchor_formal` · `narrator_female` · `documentary_cinematic`. لكلٍّ مقطع مرجعي مختلف أو إزاحة هوية مختلفة + إيقاع وماستر خاص؛ لكن المقاطع المرفقة **تجريبية** (3 أصوات فقط). للتنوّع الحقيقي: `set_voice_reference` (ويمكن لكل عاطفة `emotion=`).

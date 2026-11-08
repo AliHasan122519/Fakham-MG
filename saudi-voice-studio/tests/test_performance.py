@@ -9,6 +9,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ["SVS_HOME"] = str(Path(__file__).resolve().parent / "_tmp_home_perf")
 os.environ["SVS_TOKEN"] = "t"
+os.environ["SVS_VERIFY"] = "off"
+os.environ["SVS_ASR"] = "off"
+os.environ["SVS_SEMANTIC"] = "off"   # fast, offline unit tests (semantic checks live in test_semantic_slow.py)   # tests never load the speech recognizer
 
 from svs import analysis, audio, delivery, plan as planmod, pronounce, render  # noqa: E402
 

@@ -263,7 +263,7 @@ def metrics(path: Path) -> dict:
     fq = np.fft.rfftfreq(len(x), 1 / 16000) if len(x) > 1024 else np.array([0, 1.0])
     voiced = rms[rms > 0.02]
     return {"duration_s": round(dur, 2), "lufs": g("I"), "lra": g("LRA"), "true_peak_db": g("Peak"),
-            "noise_floor_db": float(round(20 * np.log10(max(float(np.percentile(rms, 10)), 1e-6)), 1)),
+            "noise_floor_db": float(round(20 * np.log10(max(float(np.percentile(rms[rms > 1e-5], 10)) if (rms > 1e-5).sum() > 10 else 1e-6, 1e-6)), 1)),   # digital-silence frames (exact pauses) excluded
             "energy_above_4k_pct": round(100 * float(S[fq > 4000].sum() / (S.sum() + 1e-12)), 2),
             "pauses_over_250ms": len(runs), "pause_total_s": round(float(sum(runs)), 2),
             "pause_mean_s": round(float(np.mean(runs)), 2) if runs else 0.0,

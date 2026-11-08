@@ -21,7 +21,8 @@ def analyze(text: str, *, voice: str = "narrator_deep", dialect: str | None = No
 
 def generate(text: str = "", voice_id: str = "narrator_deep", dialect: str | None = None, emotion: str = "auto",
              speed: float | None = None, fmt: str = "both", progress: Callable | None = None, seed: int | None = None,
-             plan: dict | None = None, style: str | None = None, controls: dict | None = None) -> dict:
+             plan: dict | None = None, style: str | None = None, controls: dict | None = None,
+             compare_raw: bool | None = None) -> dict:
     """Render either an explicit (edited) plan or text analysed on the fly.
 
     emotion='auto' → detect per sentence; any concrete emotion key → manual mode with that emotion everywhere."""
@@ -34,7 +35,7 @@ def generate(text: str = "", voice_id: str = "narrator_deep", dialect: str | Non
             plan = planmod.build(text, voice=voice_id, dialect=dialect, style=style or None,
                                  mode="auto" if auto else "manual", controls=ctrl,
                                  emotion=None if auto else emotion)
-        take = render.render(plan, fmt=fmt, progress=progress)
+        take = render.render(plan, fmt=fmt, progress=progress, compare_raw=compare_raw)
     except (ValueError, KeyError, render.RenderError) as e:
         raise StudioError(str(e))
     return take
@@ -48,6 +49,8 @@ def take_view(take: dict) -> dict:
             "dialect_native": take["dialect_native"], "dialect_note": take["dialect_note"],
             "voice": take["plan"]["voice"], "style": take["plan"]["style"], "mode": take["plan"]["mode"],
             "warnings": take["warnings"], "metrics": take["metrics"], "cache_hits": take["cache_hits"],
-            "segments": [{"id": s["id"], "text": s["text"], "spoken": s["spoken"], "emotion": s["emotion"],
+            "intelligibility": take.get("intelligibility", {}), "intelligibility_compare": take.get("intelligibility_compare"),
+            "baseline_kind": take.get("baseline_kind"),
+            "segments": [{"id": s["id"], "text": s["text"], "corrected": s.get("corrected"), "vocalized": s.get("vocalized"), "spoken": s["spoken"], "emotion": s["emotion"],
                           "intensity": s["intensity"], "params": s["params"], "seed": s["seed"]}
                          for s in take["plan"]["segments"]]}

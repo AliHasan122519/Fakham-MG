@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
-from . import config, delivery, history, jobs, plan as planmod, pronounce, render, studio, voices
+from . import config, delivery, enhance, history, jobs, plan as planmod, pronounce, refaudio, render, studio, voices
 from .engine import ENGINE, EngineUnavailable
 
 app = FastAPI(title="Saudi Voice Studio", docs_url=None, redoc_url=None)
@@ -114,6 +114,29 @@ def api_analyze(req: AnalyzeReq):
         raise HTTPException(400, str(e))
 
 
+class EnhanceReq(BaseModel):
+    text: str = Field(min_length=1, max_length=20000)
+    voice: str = "narrator_deep"
+    dialect: str | None = None
+    style: str | None = None
+    mode: str = "auto"
+    emotion: str | None = None
+    controls: dict | None = None
+    diacritics: str = "selective"
+    compare_raw: bool = True
+
+
+@app.post("/api/enhance", dependencies=[Depends(auth)])
+def api_enhance(req: EnhanceReq):
+    """التحسين الذكي: analysis + pronunciation + context diacritics + emotions + delivery plan (for review)."""
+    try:
+        return enhance.smart_enhance(req.text, voice=req.voice, dialect=req.dialect, style=req.style or None, mode=req.mode,
+                                     controls=req.controls, emotion=req.emotion, diacritics=req.diacritics,
+                                     compare_raw=req.compare_raw)
+    except (ValueError, KeyError) as e:
+        raise HTTPException(400, str(e))
+
+
 @app.post("/api/plan/recompute", dependencies=[Depends(auth)])
 def api_recompute(plan: dict):
     try:
@@ -179,7 +202,11 @@ def api_job(jid: str):
         raise HTTPException(404, "مهمة غير موجودة")
     view = {k: v for k, v in job.items() if k != "result"}
     if job["state"] == "done":
-        view["take"] = studio.take_view(job["result"])
+        r = job["result"]
+        if isinstance(r, dict) and "plan" in r and "metrics" in r:
+            view["take"] = studio.take_view(r)
+        else:
+            view["result"] = r
     return view
 
 
@@ -219,33 +246,101 @@ def files_legacy(take_id: str, ext: str, download: int = 0):
     return files_take(take_id, f"master.{ext}", download)
 
 
+@app.post("/api/reference/analyze", dependencies=[Depends(auth)])
+def api_ref_analyze(ref: UploadFile = File(...), ref_text: str = Form("")):
+    """Upload → decode/analyse/clean/verify → preview (nothing is saved to any voice yet)."""
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td) / "ref_in"
+            _save_upload(ref, tmp)
+            return refaudio.analyze_upload(tmp, ref_text)
+    except (refaudio.RefError, ValueError) as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/files/ref/{pid}/{name}", dependencies=[Depends(auth)])
+def api_ref_file(pid: str, name: str):
+    try:
+        return FileResponse(refaudio.preview_file(pid, name), media_type="audio/wav")
+    except refaudio.RefError as e:
+        raise HTTPException(404, str(e))
+
+
+class RefTestReq(BaseModel):
+    preview_id: str
+    dialect: str = "najdi"
+
+
+@app.post("/api/reference/test", dependencies=[Depends(auth)])
+def api_ref_test(req: RefTestReq):
+    if jobs.running_count() >= jobs.MAX_RUNNING:
+        raise HTTPException(429, "توجد مهام قيد التنفيذ؛ انتظر.")
+    try:
+        refaudio.preview_file(req.preview_id, "processed.wav")
+    except refaudio.RefError as e:
+        raise HTTPException(404, str(e))
+    return {"job": jobs.start(lambda progress=None, **kw: refaudio.test_voice(progress=progress, **kw),
+                              preview_id=req.preview_id, dialect=req.dialect)}
+
+
+class RefCommitReq(BaseModel):
+    preview_id: str
+    ref_text: str = Field(min_length=1, max_length=600)
+    emotion: str | None = None
+    use: str = "processed"
+    # when creating a NEW voice together with its reference:
+    name_ar: str | None = None
+    gender: str = "male"
+    base_on: str | None = None
+    default_dialect: str = "najdi"
+
+
+@app.post("/api/voices/{voice_id}/reference/commit", dependencies=[Depends(auth)])
+def api_ref_commit(voice_id: str, req: RefCommitReq):
+    try:
+        voices.check_id(voice_id)
+        if req.name_ar and not any(v["id"] == voice_id for v in voices.list_voices()):
+            voices.create_voice(voice_id, req.name_ar, gender=req.gender, default_dialect=req.default_dialect,
+                                base_on=req.base_on or None)
+        refaudio.commit(voice_id, req.preview_id, req.ref_text, req.emotion, use=req.use)
+        v = voices.get_voice(voice_id)
+        return {k: x for k, x in v.items() if not k.startswith("_")}
+    except (refaudio.RefError, ValueError, KeyError) as e:
+        raise HTTPException(400, str(e))
+
+
 @app.post("/api/voices", dependencies=[Depends(auth)])
 def api_create_voice(voice_id: str = Form(...), name_ar: str = Form(...), gender: str = Form("male"),
                      description: str = Form(""), default_dialect: str = Form("najdi"), speed: float = Form(1.0),
                      base_on: str = Form(""), ref_text: str = Form(""), ref: UploadFile | None = File(None)):
+    """Create a voice (optionally with a reference that goes through the full verification pipeline)."""
     try:
-        v = voices.create_voice(voice_id, name_ar, gender=gender, description=description,
-                                default_dialect=default_dialect, speed=speed, base_on=base_on or None)
         if ref is not None and ref.filename:
             with tempfile.TemporaryDirectory() as td:
                 tmp = Path(td) / "ref_in"
                 _save_upload(ref, tmp)
-                voices.save_reference(voice_id, tmp, ref_text)
+                res = refaudio.analyze_upload(tmp, ref_text)
+            if res["verdict"]["status"] == "reject":
+                raise ValueError(" ".join(res["verdict"]["reject"]))
+        v = voices.create_voice(voice_id, name_ar, gender=gender, description=description,
+                                default_dialect=default_dialect, speed=speed, base_on=base_on or None)
+        if ref is not None and ref.filename:
+            refaudio.commit(voice_id, res["preview_id"], res["transcript"])
         v = voices.get_voice(voice_id)
         return {k: x for k, x in v.items() if not k.startswith("_")}
-    except (ValueError, KeyError) as e:
+    except (ValueError, KeyError, refaudio.RefError) as e:
         raise HTTPException(400, str(e))
 
 
 @app.post("/api/voices/{voice_id}/reference", dependencies=[Depends(auth)])
-def api_set_ref(voice_id: str, ref_text: str = Form(...), ref: UploadFile = File(...), emotion: str = Form("")):
+def api_set_ref(voice_id: str, ref_text: str = Form(""), ref: UploadFile = File(...), emotion: str = Form("")):
     try:
         voices.get_voice(voice_id)
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td) / "ref_in"
             _save_upload(ref, tmp)
-            voices.save_reference(voice_id, tmp, ref_text, emotion=emotion or None)
-        return {"ok": True}
+            res = voices.save_reference(voice_id, tmp, ref_text, emotion=emotion or None)
+        return {"ok": True, "quality": res["quality"], "verdict": res["verdict"]}
     except (ValueError, KeyError) as e:
         raise HTTPException(400, str(e))
 

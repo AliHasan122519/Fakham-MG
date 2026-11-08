@@ -140,13 +140,49 @@ def detect_emotion(sentence: str, *, genre: str = "narration", position: float =
             "cues": {k: v for k, v in cues.items() if k == emo}, "sentence_type": stype}
 
 
-def analyze(text: str) -> dict:
-    """Full analysis of raw text → genre + per-sentence emotion proposals."""
+def analyze(text: str, *, use_semantic: bool = True) -> dict:
+    """Full analysis of raw text → genre + per-sentence emotion proposals.
+
+    With the semantic model available the decision is MEANING-based: 0.7 × embedding-similarity probability + 0.3 ×
+    lexical evidence (+ neighbour smoothing for emotional continuity). Without it, the lexical method alone is used."""
     text = text_ar.normalize(text, numbers=False)
     sents = split_paragraphs_sentences(text)
     genre, gscores = detect_genre(text)
     n = len(sents)
     for i, s in enumerate(sents):
         s.update(detect_emotion(s["text"], genre=genre, position=(i / max(1, n - 1)) if n > 1 else 0.5))
+        s["method"] = "lexical"
+    method = "lexical"
+    if use_semantic:
+        try:
+            from . import semantic
+            if semantic.available():
+                sem = semantic.emotion_scores([s["text"] for s in sents])
+                for s, r in zip(sents, sem):
+                    probs = r["probs"]
+                    lex = s["scores"]
+                    comb = {e: 0.7 * probs.get(e, 0.0) + 0.3 * min(1.0, lex.get(e, 0.0) / 2.5) for e in probs}
+                    tot = sum(comb.values()) or 1.0
+                    top = max(comb, key=comb.get)
+                    conf = comb[top] / tot
+                    if s["sentence_type"] == "exclamation" and top == "neutral":
+                        top = "excitement" if probs.get("excitement", 0) >= probs.get("joy", 0) else "joy"
+                    inten = max(0.25, min(1.0, 0.25 + 0.9 * conf))
+                    if s["sentence_type"] == "exclamation":
+                        inten = min(1.0, inten + 0.1)
+                    if top == "neutral":
+                        inten = 0.3
+                    s.update(emotion=top, intensity=round(inten, 2), method="semantic+lexical",
+                             probs={k: round(v, 3) for k, v in sorted(probs.items(), key=lambda kv: -kv[1])[:3]},
+                             nearest=r["nearest"].get(top), cues={top: s["cues"].get(top, [])} if s["cues"] else {})
+                method = "semantic+lexical"
+                gsem = semantic.genre_scores([s["text"] for s in sents])
+                gbest = max(gsem, key=gsem.get)
+                srt = sorted(gsem.values())
+                if gscores.get(genre, 0) < 2.0 and srt[-1] - srt[-2] > 0.008:
+                    genre = gbest
+                gscores = {**gscores, **{"sem:" + k: round(v, 3) for k, v in gsem.items()}}
+        except Exception:                      # model missing / offline: keep the lexical result
+            method = "lexical"
     return {"genre": genre, "genre_name": L.GENRES.get(genre, ("سرد", ""))[0], "genre_scores": gscores,
-            "style": L.GENRE_STYLE.get(genre, "narration"), "sentences": sents}
+            "style": L.GENRE_STYLE.get(genre, "narration"), "sentences": sents, "method": method}

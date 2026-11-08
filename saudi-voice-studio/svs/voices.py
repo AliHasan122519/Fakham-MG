@@ -137,20 +137,19 @@ def emotion_refs(voice_id: str) -> list[str]:
     return sorted(p.name.split(".")[1] for p in config.USER_REFS.glob(f"{voice_id}.*.wav"))
 
 
-def save_reference(voice_id: str, src_audio: Path, transcript: str, emotion: str | None = None) -> Path:
-    """Attach an authorised reference clip (5-10 s) + its exact transcript to a voice (optionally for one emotion)."""
+def save_reference(voice_id: str, src_audio: Path, transcript: str, emotion: str | None = None, *, use_asr: bool = True) -> dict:
+    """Attach an authorised reference clip to a voice. The clip is decoded, analysed, cleaned (guarded) and its transcript
+    verified; damaged clips are REJECTED with a clear reason instead of being saved. Returns the quality report."""
+    from . import refaudio
     check_id(voice_id)
-    if emotion is not None and not re.match(r"^[a-z]{3,12}$", emotion):
-        raise ValueError("اسم العاطفة غير صالح.")
-    suffix = f".{emotion}" if emotion else ""
-    if not transcript.strip():
-        raise ValueError("النص المنطوق في المقطع المرجعي (ref_text) مطلوب وبدقة.")
-    if len(transcript) > 1000:
-        raise ValueError("النص المرجعي طويل جدًا (الحد 1000 حرف).")
-    dst = config.USER_REFS / f"{voice_id}{suffix}.wav"
-    audio.prepare_reference(Path(src_audio), dst)
-    (config.USER_REFS / f"{voice_id}{suffix}.txt").write_text(transcript.strip(), encoding="utf-8")
-    return dst
+    try:
+        res = refaudio.analyze_upload(Path(src_audio), transcript, use_asr=use_asr)
+        if res["verdict"]["status"] == "reject":
+            raise ValueError(" ".join(res["verdict"]["reject"]))
+        refaudio.commit(voice_id, res["preview_id"], res["transcript"], emotion)
+    except refaudio.RefError as e:
+        raise ValueError(str(e))
+    return res
 
 
 def create_voice(voice_id: str, name_ar: str, *, gender: str = "male", description: str = "",
@@ -162,6 +161,8 @@ def create_voice(voice_id: str, name_ar: str, *, gender: str = "male", descripti
     base = {}
     if base_on:
         base = {k: v for k, v in get_voice(base_on).items() if k in ("fx", "speed", "nfe_step", "gender")}
+        # Identity belongs to YOUR reference clip: never inherit another persona's pitch/formant identity shift.
+        base["fx"] = {k: v for k, v in (base.get("fx") or {}).items() if k != "pitch_st"}
     v = dict(id=voice_id, name_ar=name_ar, gender=gender, description=description,
              default_dialect=default_dialect, speed=speed, nfe_step=nfe_step,
              fx=fx if fx is not None else base.get("fx", {}), ref_audio=None, ref_text=None)

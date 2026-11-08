@@ -19,7 +19,7 @@ from urllib.parse import quote, urlparse
 
 from mcp.server.mcpserver import MCPServer
 
-from . import config, delivery, history, jobs, plan as planmod, pronounce, render, studio, voices
+from . import config, delivery, enhance, history, jobs, plan as planmod, pronounce, refaudio, render, studio, voices
 from .engine import ENGINE
 
 mcp = MCPServer(
@@ -80,6 +80,21 @@ def analyze_text(text: str, voice: str = "narrator_deep", dialect: str = "", sty
             "summary": [{"id": x["id"], "text": x["text"], "emotion": x["emotion"], "intensity": x["intensity"],
                          "why": x["detected"]["cues"], "ambiguous": [a["word"] for a in x["pronunciation"]["flags"]["ambiguous"]]}
                         for x in p["segments"]]}
+
+
+@mcp.tool()
+def smart_enhance(text: str, voice: str = "narrator_deep", dialect: str = "", style: str = "", mode: str = "auto",
+                  emotion: str = "", diacritics: str = "selective", compare_raw: bool = False) -> dict:
+    """«التحسين الذكي»: يحلّل المعنى (تمثيلات دلالية)، يصحّح النطق، يشكّل الكلمات الملتبسة من السياق، يحدد العاطفة لكل جملة،
+    ويبني خطة إلقاء. يعيد لكل جملة: النص الأصلي والمصحّح والمشكول والعاطفة وسببها. راجِعها (وصحّحها إن لزم) ثم مرّر plan
+    إلى generate_voiceover(plan_json=...). compare_raw=true يولّد أيضًا نسخة خام حقيقية للمقارنة (يضاعف الوقت)."""
+    p = enhance.smart_enhance(text, voice=voice, dialect=dialect or None, style=style or None, mode=mode,
+                              emotion=emotion or None, diacritics=diacritics, compare_raw=compare_raw)
+    return {"plan": p, "steps": p["enhancement"]["steps"],
+            "sentences": [{"id": x["id"], "original": x["text"], "corrected": x.get("corrected"), "vocalized": x.get("vocalized"),
+                           "emotion": x["emotion"], "intensity": x["intensity"], "why": x["detected"].get("nearest") or x["detected"]["cues"],
+                           "needs_choice": [u["word"] for u in (x.get("tashkeel") or {}).get("unresolved", [])]}
+                          for x in p["segments"]]}
 
 
 @mcp.tool()
@@ -220,6 +235,25 @@ def _fetch_audio(audio_base64: str, audio_url: str, td: str) -> Path:
     return dst
 
 
+def _ref_summary(res: dict) -> dict:
+    return {"status": res["verdict"]["status"], "score": res["verdict"]["score"], "messages": res["verdict"]["messages"],
+            "snr_db": res["quality"]["snr_db"], "bandwidth_hz": res["quality"]["bandwidth_hz"],
+            "speech_seconds": res["speech_seconds"], "transcript": res["transcript"],
+            "asr_similarity": res["asr"].get("similarity"), "denoised": res.get("guard", {}).get("denoise_applied")}
+
+
+@mcp.tool()
+def analyze_reference(transcript: str = "", audio_base64: str = "", audio_url: str = "") -> dict:
+    """افحص مقطعًا مرجعيًا قبل حفظه (بلا حفظ): جودة (ضجيج/قطع/عرض نطاق)، هل فيه كلام، وهل النص يطابقه (تفريغ آلي).
+    إن تُرك transcript فارغًا يُفرَّغ المقطع آليًا. يرفض المقاطع التالفة برسالة مفهومة."""
+    with tempfile.TemporaryDirectory() as td:
+        try:
+            res = refaudio.analyze_upload(_fetch_audio(audio_base64, audio_url, td), transcript)
+        except (refaudio.RefError, ValueError) as e:
+            return {"status": "reject", "messages": [str(e)]}
+    return _ref_summary(res)
+
+
 @mcp.tool()
 def set_voice_reference(voice_id: str, transcript: str, i_confirm_rights: bool, audio_base64: str = "",
                         audio_url: str = "", emotion: str = "") -> dict:
@@ -230,8 +264,8 @@ def set_voice_reference(voice_id: str, transcript: str, i_confirm_rights: bool, 
         return {"error": "رفضت العملية: لا يُستنسخ صوت دون إقرار صريح بالحق/الإذن (i_confirm_rights=true)."}
     voices.get_voice(voice_id)
     with tempfile.TemporaryDirectory() as td:
-        voices.save_reference(voice_id, _fetch_audio(audio_base64, audio_url, td), transcript, emotion=emotion or None)
-    return {"ok": True, "voice": voice_id, "emotion": emotion or None}
+        res = voices.save_reference(voice_id, _fetch_audio(audio_base64, audio_url, td), transcript, emotion=emotion or None)
+    return {"ok": True, "voice": voice_id, "emotion": emotion or None, "quality": _ref_summary(res)}
 
 
 @mcp.tool()
@@ -244,11 +278,12 @@ def clone_voice(voice_id: str, name_ar: str, transcript: str, i_confirm_rights: 
                         fx={"compress": True})
     try:
         with tempfile.TemporaryDirectory() as td:
-            voices.save_reference(voice_id, _fetch_audio(audio_base64, audio_url, td), transcript)
+            res = voices.save_reference(voice_id, _fetch_audio(audio_base64, audio_url, td), transcript)
     except Exception:
         voices.delete_voice(voice_id)
         raise
-    return {"ok": True, "voice": voice_id, "next": f"generate_voiceover(voice='{voice_id}', text=...)"}
+    return {"ok": True, "voice": voice_id, "quality": _ref_summary(res),
+            "next": f"generate_voiceover(voice='{voice_id}', text=...)"}
 
 
 @mcp.tool()

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import uuid
 
-from . import analysis, delivery, lexicon_ar, pronounce, voices
+from . import analysis, delivery, lexicon_ar, pronounce, tashkeel, voices
 
 MAX_SEGMENTS = 60
 MAX_CHARS = 6000
@@ -16,8 +16,12 @@ def _seg_seed(plan_id: str, idx: int) -> int:
     return int(hashlib.sha256(f"{plan_id}:{idx}".encode()).hexdigest()[:7], 16)
 
 
+DIACRITICS = ("none", "selective")
+
+
 def build(text: str, *, voice: str = "narrator_deep", dialect: str | None = None, style: str | None = None,
-          mode: str = "auto", controls: dict | None = None, emotion: str | None = None) -> dict:
+          mode: str = "auto", controls: dict | None = None, emotion: str | None = None,
+          diacritics: str = "none", use_semantic: bool = True) -> dict:
     """Analyse text and produce an editable plan. mode='manual' => every segment starts at `emotion` (or neutral)
     instead of the detected emotion (detections are still shown as suggestions)."""
     if mode not in MODES:
@@ -31,7 +35,9 @@ def build(text: str, *, voice: str = "narrator_deep", dialect: str | None = None
     dialect = dialect or v["default_dialect"]
     if dialect not in voices.dialects():
         raise ValueError(f"لهجة غير معروفة: {dialect}")
-    an = analysis.analyze(text)
+    if diacritics not in DIACRITICS:
+        raise ValueError("diacritics must be none|selective")
+    an = analysis.analyze(text, use_semantic=use_semantic)
     if len(an["sentences"]) > MAX_SEGMENTS:
         raise ValueError(f"عدد الجمل كبير ({len(an['sentences'])}). الحد {MAX_SEGMENTS}.")
     ctrl = delivery.clean_controls(controls)
@@ -40,16 +46,22 @@ def build(text: str, *, voice: str = "narrator_deep", dialect: str | None = None
     segs = []
     for i, s in enumerate(an["sentences"]):
         sp = pronounce.to_spoken(s["text"], dialect, light_dialect=ctrl["light_dialect"])
+        voc = tashkeel.vocalize_sentence(sp["spoken"], use_semantic=use_semantic) if diacritics == "selective" else None
         emo = delivery.canon_emotion(emotion or "neutral") if mode == "manual" else s["emotion"]
-        segs.append({"id": f"s{i + 1}", "text": s["text"], "spoken": sp["spoken"], "pronunciation": sp,
+        segs.append({"id": f"s{i + 1}", "text": s["text"], "corrected": sp["spoken"],
+                     "vocalized": voc["vocalized_waqf"] if voc else None,
+                     "tashkeel": ({"resolved": voc["resolved"], "unresolved": voc["unresolved"]} if voc else None),
+                     "spoken": voc["vocalized_waqf"] if voc else sp["spoken"], "pronunciation": sp,
                      "paragraph": s["paragraph"], "first_in_paragraph": s["first_in_paragraph"],
                      "last_in_paragraph": s["last_in_paragraph"], "sentence_type": s["sentence_type"],
                      "emotion": emo, "intensity": s["intensity"] if mode == "auto" else 0.6,
                      "detected": {"emotion": s["emotion"], "intensity": s["intensity"], "cues": s["cues"],
-                                  "scores": s["scores"]},
+                                  "scores": s["scores"], "probs": s.get("probs"), "nearest": s.get("nearest"),
+                                  "method": s.get("method", "lexical")},
                      "overrides": {}, "seed": _seg_seed(plan_id, i), "spoken_edited": False})
     plan = {"version": 2, "id": plan_id, "voice": voice, "dialect": dialect, "style": style, "mode": mode,
             "genre": an["genre"], "genre_name": an["genre_name"], "controls": ctrl, "segments": segs,
+            "analysis_method": an.get("method", "lexical"), "diacritics": diacritics,
             "voice_style": v.get("style", "narration")}
     return recompute(plan)
 
@@ -81,6 +93,7 @@ def validate(plan: dict) -> dict:
     out["style"] = out["style"] if out["style"] in delivery.STYLES else "narration"
     out["mode"] = out["mode"] if out["mode"] in MODES else "auto"
     out["controls"] = delivery.clean_controls(plan.get("controls"))
+    out["enhancement"] = {"compare_raw": bool((plan.get("enhancement") or {}).get("compare_raw"))}
     segs, total_chars = [], 0
     for i, s in enumerate(plan["segments"]):
         spoken = str(s.get("spoken") or s.get("text") or "").strip()
@@ -92,6 +105,8 @@ def validate(plan: dict) -> dict:
             if (s.get("overrides") or {}).get(k) is not None:
                 ov[k] = delivery.clamp(float(s["overrides"][k]), lo, hi)
         segs.append({"id": str(s.get("id") or f"s{i + 1}")[:12], "text": str(s.get("text", spoken))[:1000],
+                     "corrected": str(s.get("corrected") or "")[:1000] or None,
+                     "vocalized": str(s.get("vocalized") or "")[:1000] or None,
                      "spoken": spoken[:1000], "paragraph": int(s.get("paragraph", 0)),
                      "first_in_paragraph": bool(s.get("first_in_paragraph")),
                      "last_in_paragraph": bool(s.get("last_in_paragraph")),

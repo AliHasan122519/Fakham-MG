@@ -8,6 +8,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ["SVS_HOME"] = str(Path(__file__).resolve().parent / "_tmp_home_sec")
 os.environ["SVS_TOKEN"] = "t"
+os.environ["SVS_VERIFY"] = "off"
+os.environ["SVS_ASR"] = "off"
+os.environ["SVS_SEMANTIC"] = "off"   # fast, offline unit tests (semantic checks live in test_semantic_slow.py)   # tests never load the speech recognizer
 
 from svs import audio, config, mcp_server, voices  # noqa: E402
 
@@ -42,27 +45,31 @@ def test_base64_cap_and_validation(tmp_path):
         mcp_server._fetch_audio("not base64!!", "", str(tmp_path))
 
 
-def test_ffmpeg_playlist_cannot_read_local_files(tmp_path):
-    """Defense in depth: with the ffmpeg build tested the nameless-file HLS trick was not exploitable anyway,
-    but other builds/formats may differ, so references are fed via stdin with a pipe-only protocol whitelist."""
+def test_reference_decoder_refuses_playlists_and_non_audio(tmp_path):
+    """Defense in depth: HLS/concat playlists could make ffmpeg read other local files. The decoder only accepts
+    allow-listed audio containers (checked with ffprobe BEFORE decoding) and whitelists the `file` protocol only."""
+    from svs import refaudio
     secret = tmp_path / "secret.wav"
-    secret.write_bytes(b"RIFF....WAVE")
+    import subprocess
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=f=330:d=1", str(secret)], check=True)
     for name, body in {
         "hls": f"#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nfile://{secret}\n#EXT-X-ENDLIST\n",
         "concat": f"ffconcat version 1.0\nfile '{secret}'\n",
+        "text": "not audio at all",
     }.items():
         src = tmp_path / f"{name}.bin"
         src.write_text(body)
-        with pytest.raises(ValueError):
-            audio.prepare_reference(src, tmp_path / f"{name}.wav")
+        with pytest.raises(refaudio.RefError):
+            refaudio.decode(src)
 
 
-def test_valid_wav_still_converts(tmp_path):
+def test_valid_wav_decodes_to_24k_mono(tmp_path):
     import subprocess
+    from svs import refaudio
     src = tmp_path / "t.wav"
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=f=220:d=1", str(src)], check=True)
-    out = audio.prepare_reference(src, tmp_path / "o.wav")
-    assert out.is_file() and audio.duration(out) > 0.5
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=f=220:d=2", "-ac", "2", "-ar", "44100", str(src)], check=True)
+    x, meta = refaudio.decode(src)
+    assert abs(len(x) / 24000 - 2.0) < 0.1 and meta["src_channels"] == 2 and meta["src_sample_rate"] == 44100
 
 
 def test_refuse_public_bind_without_token(monkeypatch):

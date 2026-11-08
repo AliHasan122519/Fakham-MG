@@ -78,7 +78,11 @@ table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{padding:5px 4px
     <b>التحكم</b> <span class="note">(يعمل في الوضعين؛ في التلقائي يعدّل ما اكتشفه النظام)</span>
     <div id="ctl"></div>
     <label><input id="light" type="checkbox"> تحويل لهجي خفيف لبعض الكلمات (تقريبي — راجع النص المنطوق)</label>
-    <button class="btn" id="analyze">🔍 تحليل النص وبناء خطة الأداء</button>
+    <label><input id="diac" type="checkbox" checked> التشكيل السياقي للكلمات الملتبسة (علم/ذهب/كتب…)</label>
+    <label><input id="cmpraw" type="checkbox" checked> قارن بنسخة خام حقيقية (يضاعف وقت التوليد)</label>
+    <button class="btn" id="smart">✨ التحسين الذكي</button>
+    <div id="steps" class="note"></div>
+    <button class="btn ghost" id="analyze">🔍 تحليل سريع فقط (بدون تحسين ذكي)</button>
     <div class="err" id="aerr"></div>
   </div>
 </section>
@@ -88,7 +92,7 @@ table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{padding:5px 4px
   <div class="card" id="planhead"><span class="note">حلّل نصًا أولًا من تبويب «النص».</span></div>
   <div id="segs"></div>
   <div class="card hide" id="genbox">
-    <button class="btn" id="go">🎙️ توليد الصوت من هذه الخطة</button>
+    <button class="btn" id="go">✅ موافقة وتوليد الصوت</button>
     <div class="bar hide" id="bar"><i id="barf"></i></div>
     <div class="note" id="msg"></div><div class="err" id="gerr"></div>
   </div>
@@ -115,7 +119,7 @@ table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{padding:5px 4px
 <section id="t-voices" class="hide">
   <div class="card"><b>الشخصيات</b><div id="vlist"></div></div>
   <div class="card"><b>إضافة مقطع مرجعي / شخصية جديدة</b>
-    <p class="note">هوية الصوت الفعلية تأتي من <b>مقطع مرجعي</b> (٥–١٠ ثوانٍ، متحدث واحد، نظيف، مع نصه الحرفي). لنبرة عاطفية حقيقية مختلفة ارفع مقطعًا <b>لكل عاطفة</b>. ارفع فقط أصواتًا تملك حقها.</p>
+    <p class="note">هوية الصوت الفعلية تأتي من <b>مقطع مرجعي</b>: ٥–١٠ ثوانٍ، متحدث واحد، <b>بلا ضجيج ولا موسيقى</b>، قريبًا من الميكروفون. سأفحصه قبل الحفظ وأرفض التالف. ارفع فقط أصواتًا تملك حقها.</p>
     <label for="nvid">معرّف الصوت (إنجليزي صغير)</label><input id="nvid" type="text" placeholder="narrator_deep أو my_voice">
     <label for="nvname">الاسم بالعربية (للصوت الجديد)</label><input id="nvname" type="text">
     <div class="row">
@@ -123,10 +127,24 @@ table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{padding:5px 4px
       <div><label for="nvemo">العاطفة (اختياري)</label><select id="nvemo"></select></div>
     </div>
     <label for="nvbase">إعدادات مبنية على</label><select id="nvbase"></select>
-    <label for="nvref">المقطع المرجعي (ملف أو تسجيل)</label><input id="nvref" type="file" accept="audio/*">
-    <label for="nvtxt">النص المنطوق حرفيًا في المقطع</label><input id="nvtxt" type="text">
-    <label><input id="nvauth" type="checkbox"> أُقرّ بأنني أملك حق استخدام هذا الصوت أو لديّ إذن صاحبه</label>
-    <button class="btn" id="nvgo">حفظ</button><div class="err" id="nverr"></div><div class="note" id="nvok"></div>
+    <label for="nvref">المقطع المرجعي (ملف صوتي أو تسجيل من الجوال)</label><input id="nvref" type="file" accept="audio/*">
+    <label for="nvtxt">النص المنطوق حرفيًا في المقطع <span class="note">(اتركه فارغًا ليُفرَّغ آليًا ثم راجعه)</span></label><input id="nvtxt" type="text">
+    <button class="btn" id="nvcheck">🔬 فحص المقطع ومعاينته</button>
+    <div class="err" id="nverr"></div>
+    <div id="refrep" class="hide">
+      <div id="refbadge" style="margin-top:10px"></div>
+      <div id="refmsgs" class="note"></div>
+      <table id="reftab"></table>
+      <label>الأصل (بعد القص والضبط فقط)</label><audio id="refa" controls preload="none"></audio>
+      <label>المعالَج (ما سيُحفظ)</label><audio id="refb" controls preload="none"></audio>
+      <div id="refguard" class="note"></div>
+      <label for="nvtxt2">النص المنطوق (عدّله إن كان التفريغ الآلي خاطئًا)</label><input id="nvtxt2" type="text">
+      <label><input id="nvuseorig" type="checkbox"> احفظ «الأصل» بدل المعالَج</label>
+      <label><input id="nvauth" type="checkbox"> أُقرّ بأنني أملك حق استخدام هذا الصوت أو لديّ إذن صاحبه</label>
+      <div class="row"><button class="btn ghost" id="nvtest">🧪 اختبر بتوليد جملة (دقيقة)</button><button class="btn" id="nvsave">💾 حفظ</button></div>
+      <div id="reftest" class="note"></div><audio id="refc" controls preload="none" class="hide"></audio>
+      <div class="note" id="nvok"></div>
+    </div>
   </div>
 </section>
 
@@ -198,27 +216,39 @@ $('#analyze').onclick=async()=>{$('#aerr').textContent='';$('#analyze').disabled
       style:$('#style').value||null,mode:$('#mode').value,emotion:$('#mode').value==='manual'?$('#emo').value:null,controls:readCtl('g')});
     S.plan=plan;S.take=null;renderPlan();tab('plan')}catch(e){$('#aerr').textContent=e.message}finally{$('#analyze').disabled=false}};
 
+$('#smart').onclick=async()=>{$('#aerr').textContent='';$('#smart').disabled=true;
+  const names=['١ تحليل النص ومعناه','٢ تصحيح النطق والتشكيل','٣ تحديد المشاعر','٤ إعداد خطة الإلقاء'];let k=0;
+  const tick=()=>{$('#steps').innerHTML=names.map((n,i)=>(i<k?'✔ ':i===k?'⏳ ':'○ ')+n).join('<br>')};tick();const iv=setInterval(()=>{if(k<names.length-1){k++;tick()}},1800);
+  try{const plan=await jpost('/api/enhance',{text:$('#text').value,voice:$('#voice').value,dialect:$('#dialect').value||null,style:$('#style').value||null,
+      mode:$('#mode').value,emotion:$('#mode').value==='manual'?$('#emo').value:null,controls:readCtl('g'),diacritics:$('#diac').checked?'selective':'none',compare_raw:$('#cmpraw').checked});
+    clearInterval(iv);k=names.length;tick();S.plan=plan;S.take=null;renderPlan();tab('plan')}catch(e){clearInterval(iv);$('#steps').textContent='';$('#aerr').textContent=e.message}finally{$('#smart').disabled=false}};
 function emoName(k){return (S.meta.emotions[k]||{}).name_ar||k}
 function renderPlan(){const p=S.plan;if(!p)return;
   $('#planhead').innerHTML=`<b>خطة الأداء</b> <span class="pill ok">${esc(p.genre_name)}</span><span class="pill">${esc((S.meta.styles[p.style]||{}).name_ar||p.style)}</span><span class="pill">${p.mode==='auto'?'تلقائي':'يدوي'}</span>
    <div class="note">${p.segments.length} جملة. عدّل أي شيء قبل التوليد: النص المنطوق، العاطفة، الشدة، والتفاصيل المتقدمة. ما تعدّله يُحفظ كما هو.</div>
+   ${p.enhancement&&p.enhancement.steps?`<div class="note" style="margin-top:6px">${p.enhancement.steps.map(x=>`${x.ok?'✔':'○'} <b>${esc(x.name)}</b>: ${esc(x.detail)}`).join('<br>')}</div><div class="note warn">راجع الخطة ثم اضغط «موافقة وتوليد». لن يُولَّد شيء قبل موافقتك.</div>`:''}
    <details><summary>التحكم العام (يعيد حساب الجمل)</summary><div id="pctl">${ctlHTML(p.controls,'p')}</div></details>`;
   bindCtl('p',debounce(async()=>{p.controls=readCtl('p');p.controls.light_dialect=p.controls.light_dialect||false;await recompute()},500));
   $('#segs').innerHTML=p.segments.map((s,i)=>segHTML(s,i)).join('');
   $('#genbox').classList.remove('hide');bindSegs()}
-function segHTML(s,i){const P=s.params,ov=s.overrides||{};
-  const amb=((s.pronunciation||{}).flags||{}).ambiguous||[];
+function segHTML(s,i){const P=s.params,ov=s.overrides||{};const tk=s.tashkeel;
+  const amb=tk?(tk.unresolved||[]).map(u=>({word:u.word,choices:u.choices})):(((s.pronunciation||{}).flags||{}).ambiguous||[]);
   const chips=amb.length?`<div class="chips note">كلمات بأكثر من نطق: ${amb.map(a=>a.choices.map(c=>`<button data-i="${i}" data-w="${esc(a.word)}" data-say="${esc(c.say)}">${esc(a.word)} → ${esc(c.say)} (${esc(c.gloss)})</button>`).join('')).join('<br>')}</div>`:'';
   const unk=((s.pronunciation||{}).flags||{}).unknown_latin||[];
-  const why=(s.detected&&Object.values(s.detected.cues||{}).flat().slice(0,4).join('، '))||'';
+  const d=s.detected||{};const pr=d.probs?Object.entries(d.probs).map(([k,v])=>`${emoName(k)} ${(v*100).toFixed(0)}%`).join(' · '):'';
+  const why=(d.nearest?`أقرب معنى: «${d.nearest}»`:Object.values(d.cues||{}).flat().slice(0,4).join('، '))+(pr?` — ${pr}`:'');
   return `<div class="seg" data-i="${i}">
-   <div class="orig">${i+1}. ${esc(s.text)}</div>
+   <div class="orig"><b>الأصلي:</b> ${i+1}. ${esc(s.text)}</div>
+   ${s.corrected&&s.corrected!==s.text?`<div class="orig"><b>المصحَّح:</b> ${esc(s.corrected)}</div>`:''}
+   ${s.vocalized&&s.vocalized!==s.corrected?`<div class="orig"><b>المشكول:</b> ${esc(s.vocalized)}</div>`:''}
+   ${tk?`<div class="note">${tk.resolved.map(r=>`✔ ${esc(r.word)} ← ${esc(r.say)} (من السياق)`).join(' · ')}</div>`:''}
    <label>النص المنطوق (ما يُقرأ فعلًا — عدّله للتشكيل أو الكتابة الصوتية)</label>
-   <textarea class="sp" data-f="spoken">${esc(s.spoken)}</textarea>${chips}
+   <textarea class="sp" data-f="spoken">${esc(s.spoken)}</textarea>
+   <div class="acts"><button class="btn ghost sm" data-use="text" data-i="${i}">الأصلي</button>${s.corrected?`<button class="btn ghost sm" data-use="corrected" data-i="${i}">المصحَّح</button>`:''}${s.vocalized?`<button class="btn ghost sm" data-use="vocalized" data-i="${i}">المشكول</button>`:''}</div>${chips}
    ${unk.length?`<div class="note warn">كلمات لاتينية لم أعرف نطقها: ${esc(unk.join('، '))} — أضفها للقاموس أو اكتبها بالعربية.</div>`:''}
    <div class="row"><div><label>العاطفة</label><select data-f="emotion">${Object.entries(S.meta.emotions).map(([k,x])=>`<option value="${k}" ${k===s.emotion?'selected':''}>${esc(x.name_ar)}</option>`).join('')}</select></div>
    <div><label>الشدة: <b>${(+s.intensity).toFixed(2)}</b></label><input type="range" min="0" max="1" step="0.05" value="${s.intensity}" data-f="intensity"></div></div>
-   <div class="note">${why?`دلائل الاكتشاف: ${esc(why)} · `:''}سرعة ×${P.speed_mul} · نبرة ${P.pitch_st>0?'+':''}${P.pitch_st} نغمة · جهارة ${P.gain_db>0?'+':''}${P.gain_db}dB · وقفة بعد ${P.pause_after}ث</div>
+   <div class="note">${why?`سبب العاطفة: ${esc(why)} · `:''}سرعة ×${P.speed_mul} · نبرة ${P.pitch_st>0?'+':''}${P.pitch_st} نغمة · جهارة ${P.gain_db>0?'+':''}${P.gain_db}dB · وقفة بعد ${P.pause_after}ث</div>
    <details><summary>تفاصيل متقدمة (تعديل يدوي)</summary>
     <div class="row">
      <div><label>سرعة ×</label><input type="number" step="0.02" min="0.6" max="1.5" data-o="speed_mul" placeholder="${P.speed_mul}" value="${ov.speed_mul??''}"></div>
@@ -236,10 +266,12 @@ function bindSegs(){
   $$('#segs [data-o]').forEach(el=>el.onchange=async()=>{const i=+el.closest('.seg').dataset.i,k=el.dataset.o;const o=S.plan.segments[i].overrides=S.plan.segments[i].overrides||{};
     if(el.value==='')delete o[k];else o[k]=+el.value;await recompute()});
   $$('#segs .chips button').forEach(b=>b.onclick=()=>{const i=+b.dataset.i,s=S.plan.segments[i];s.spoken=s.spoken.replace(b.dataset.w,b.dataset.say);s.spoken_edited=true;renderPlan()});
+  $$('#segs [data-use]').forEach(b=>b.onclick=()=>{const sg=S.plan.segments[+b.dataset.i];sg.spoken=sg[b.dataset.use]||sg.text;sg.spoken_edited=true;renderPlan()});
   $$('#segs [data-act="play"]').forEach(b=>b.onclick=()=>playSeg(+b.dataset.i));
   $$('#segs [data-act="regen"]').forEach(b=>b.onclick=()=>regen(+b.dataset.i))}
 async function recompute(){try{const keep=S.plan.segments.map(s=>s.pronunciation);const np=await jpost('/api/plan/recompute',S.plan);
-  np.segments.forEach((s,i)=>{s.pronunciation=keep[i];s.detected=S.plan.segments[i].detected});np.genre_name=S.plan.genre_name;S.plan=np;renderPlan()}catch(e){alert(e.message)}}
+  np.segments.forEach((s,i)=>{const o=S.plan.segments[i];s.pronunciation=keep[i];s.detected=o.detected;s.tashkeel=o.tashkeel;s.corrected=o.corrected;s.vocalized=o.vocalized});
+  np.genre_name=S.plan.genre_name;np.enhancement=S.plan.enhancement;S.plan=np;renderPlan()}catch(e){alert(e.message)}}
 const debounce=(f,ms)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>f(...a),ms)}};
 
 // ---------------- generate
@@ -268,8 +300,11 @@ function showTake(){const t=S.take;if(!t)return;
   const a=$('#player');a.src=q(`/files/${t.id}/master.mp3`);
   $('#abAfter').classList.add('on');$('#abBefore').classList.remove('on');
   $('#dlmp3').href=q(`/files/${t.id}/master.mp3`+(TOKEN?'&':'?')+'download=1');$('#dlwav').href=q(`/files/${t.id}/master.wav`+(TOKEN?'&':'?')+'download=1');
-  $('#rmeta').textContent=`استغرق ${t.took}ث (${t.realtime_factor}× الزمن الحقيقي)${t.cache_hits?` · ${t.cache_hits} جملة من الذاكرة المؤقتة`:''}`;
-  const b=t.metrics.before,af=t.metrics.after,rows=[['الجهارة (LUFS)','lufs'],['أعلى ذروة (dB)','true_peak_db'],['مستوى الضجيج (dBFS)','noise_floor_db'],['طاقة فوق 4kHz (%)','energy_above_4k_pct'],['وقفات > 0.25ث','pauses_over_250ms'],['متوسط الوقفة (ث)','pause_mean_s'],['تنوّع النبرة (نغمات)','pitch_variation_semitones'],['ديناميكية الجهارة (dB)','loudness_dynamics_db']];
+  $('#rmeta').innerHTML=esc(`استغرق ${t.took}ث (${t.realtime_factor}× الزمن الحقيقي)${t.cache_hits?` · ${t.cache_hits} جملة من الذاكرة المؤقتة`:''}`)
+    +(t.baseline_kind==='true_raw'?'<br><b>«قبل» = نسخة خام حقيقية:</b> النص الأصلي بإلقاء محايد بلا تشكيل ولا معالجة (بجهارة مطابقة).':'<br>«قبل» = مخرجات النموذج لنفس النص بلا معالجة.')
+    +(t.intelligibility_compare?`<br>وضوح النطق آليًا (تطابق التفريغ): قبل <b>${Math.round(t.intelligibility_compare.before*100)}%</b> ← بعد <b>${Math.round(t.intelligibility_compare.after*100)}%</b>`:'')
+    +((t.warnings||[]).filter(w=>w.startsWith('low_intelligibility')).map(w=>`<br><span class="warn">⚠ الجملة ${esc(w.split(':')[1])} واضحة بنسبة ${esc(w.split(':')[2])}% فقط — أعد توليدها أو غيّر المقطع المرجعي.</span>`).join(''));
+  const b=t.metrics.before,af=t.metrics.after,rows=[['الجهارة (LUFS)','lufs'],['أعلى ذروة (dB)','true_peak_db'],['طاقة فوق 4kHz (%)','energy_above_4k_pct'],['وقفات > 0.25ث','pauses_over_250ms'],['متوسط الوقفة (ث)','pause_mean_s'],['تنوّع النبرة (نغمات)','pitch_variation_semitones'],['ديناميكية الجهارة (dB)','loudness_dynamics_db']];
   $('#metrics').innerHTML='<table><tr><th></th><th>قبل</th><th>بعد</th></tr>'+rows.map(([n,k])=>`<tr><td>${n}</td><td>${esc(b[k])}</td><td>${esc(af[k])}</td></tr>`).join('')+'</table>';
   $('#sentlist').innerHTML=t.segments.map((s,i)=>`<div class="v"><div><div>${i+1}. ${esc(s.text.slice(0,70))}</div><div class="note">${esc(emoName(s.emotion))} · ×${s.params.speed_mul} · وقفة ${s.params.pause_after}ث</div></div><div><button class="btn ghost sm" data-p="${i}">▶</button></div></div>`).join('');
   $$('#sentlist [data-p]').forEach(bt=>bt.onclick=()=>{const a=$('#player');a.src=q(`/files/${t.id}/seg_${t.segments[+bt.dataset.p].id}.mp3`);a.play()});
@@ -284,13 +319,37 @@ function renderVoices(){$('#vlist').innerHTML=S.voices.map(v=>`<div class="v"><d
   <div class="note">${esc(v.identity||v.description||'')}</div>${(v.emotion_refs||[]).length?`<div class="note">مقاطع عاطفية: ${v.emotion_refs.map(esc).join('، ')}</div>`:''}</div>
   <div>${v.builtin?'':`<button class="btn ghost sm" data-del="${esc(v.id)}">حذف</button>`}</div></div>`).join('');
   $$('#vlist [data-del]').forEach(b=>b.onclick=async()=>{if(!confirm('حذف هذا الصوت؟'))return;await api('/api/voices/'+b.dataset.del,{method:'DELETE'});await load()})}
-$('#nvgo').onclick=async()=>{$('#nverr').textContent='';$('#nvok').textContent='';
-  try{if(!$('#nvauth').checked)throw new Error('يجب الإقرار بحق استخدام الصوت.');
-    const id=$('#nvid').value.trim(),f=$('#nvref').files[0];if(!id||!f)throw new Error('المعرّف والمقطع مطلوبان.');
+let REF=null;
+const stateAr={ok:['جيّد','ok'],warn:['مقبول مع تحفّظ','no'],reject:['مرفوض','no']};
+$('#nvcheck').onclick=async()=>{$('#nverr').textContent='';$('#nvok').textContent='';$('#refrep').classList.add('hide');$('#nvcheck').disabled=true;$('#nvcheck').textContent='⏳ جارٍ الفحص…';
+  try{const f=$('#nvref').files[0];if(!f)throw new Error('اختر ملفًا صوتيًا أو سجّل مقطعًا.');
     const fd=new FormData();fd.append('ref',f);fd.append('ref_text',$('#nvtxt').value);
-    if(S.voices.some(v=>v.id===id)){fd.append('emotion',$('#nvemo').value);await api('/api/voices/'+id+'/reference',{method:'POST',body:fd})}
-    else{fd.append('voice_id',id);fd.append('name_ar',$('#nvname').value||id);fd.append('gender',$('#nvg').value);fd.append('base_on',$('#nvbase').value);await api('/api/voices',{method:'POST',body:fd})}
-    $('#nvok').textContent='تم الحفظ ✔';await load()}catch(e){$('#nverr').textContent=e.message}};
+    REF=await api('/api/reference/analyze',{method:'POST',body:fd});showRef(REF)}catch(e){$('#nverr').textContent=e.message}
+  finally{$('#nvcheck').disabled=false;$('#nvcheck').textContent='🔬 فحص المقطع ومعاينته'}};
+function showRef(r){const v=r.verdict,q=r.quality,st=stateAr[v.status];
+  $('#refrep').classList.remove('hide');
+  $('#refbadge').innerHTML=`<span class="pill ${st[1]}">${st[0]}</span> <b>الجودة ${v.score}/100</b>`;
+  $('#refmsgs').innerHTML=(v.messages.length?v.messages.map(m=>'• '+esc(m)).join('<br>'):'لا ملاحظات.')+(r.note?`<br><span class="warn">${esc(r.note)}</span>`:'');
+  const asrs=r.asr&&r.asr.similarity!=null?`${Math.round(r.asr.similarity*100)}%`:(r.asr&&r.asr.available?'—':'غير مثبّت');
+  $('#reftab').innerHTML=`<tr><th></th><th>القيمة</th></tr><tr><td>مدة الكلام</td><td>${r.speech_seconds} ث</td></tr><tr><td>نسبة الإشارة/الضجيج</td><td>${q.snr_db} dB</td></tr><tr><td>عرض النطاق</td><td>${q.bandwidth_hz} Hz</td></tr><tr><td>قطع الذروة</td><td>${q.clipping_pct}%</td></tr><tr><td>مستوى الكلام</td><td>${q.active_rms_dbfs} dBFS</td></tr><tr><td>تطابق النص مع المقطع</td><td>${asrs}</td></tr>`;
+  $('#refguard').textContent=r.guard&&r.guard.reason?('التنظيف: '+r.guard.reason):'';
+  $('#nvtxt2').value=r.transcript||'';
+  if(r.preview_id){$('#refa').src=q_('/files/ref/'+r.preview_id+'/original.wav');$('#refb').src=q_('/files/ref/'+r.preview_id+'/processed.wav')}
+  const bad=v.status==='reject'||!r.preview_id;$('#nvsave').disabled=bad;$('#nvtest').disabled=bad;
+  if(bad)$('#refa').removeAttribute('src'),$('#refb').removeAttribute('src')}
+const q_=u=>q(u);
+$('#nvtest').onclick=async()=>{if(!REF||!REF.preview_id)return;$('#reftest').textContent='⏳ يولّد جملة اختبار…';$('#nvtest').disabled=true;
+  try{const {job}=await jpost('/api/reference/test',{preview_id:REF.preview_id,dialect:$('#dialect').value||'najdi'});
+    for(;;){await new Promise(r=>setTimeout(r,2000));const j=await api('/api/jobs/'+job);if(j.state==='error')throw new Error(j.error);
+      if(j.state==='done'){const t=j.result;$('#reftest').innerHTML=(t.passed===false?'<span class="err">':'<span>')+esc(t.message)+'</span>'+(t.heard?`<br>سمعتُ: «${esc(t.heard)}»`:'');
+        $('#refc').classList.remove('hide');$('#refc').src=q('/files/ref/'+REF.preview_id+'/test.wav?_='+Date.now());if(t.passed===false)$('#nvsave').disabled=true;break}
+      $('#reftest').textContent='⏳ '+(j.message||'')}}catch(e){$('#reftest').innerHTML='<span class="err">'+esc(e.message)+'</span>'}finally{$('#nvtest').disabled=false}};
+$('#nvsave').onclick=async()=>{$('#nverr').textContent='';$('#nvok').textContent='';
+  try{if(!$('#nvauth').checked)throw new Error('يجب الإقرار بحق استخدام الصوت.');if(!REF||!REF.preview_id)throw new Error('افحص المقطع أولًا.');
+    const id=$('#nvid').value.trim();if(!id)throw new Error('المعرّف مطلوب.');
+    const body={preview_id:REF.preview_id,ref_text:$('#nvtxt2').value,emotion:$('#nvemo').value||null,use:$('#nvuseorig').checked?'original':'processed'};
+    if(!S.voices.some(v=>v.id===id)){body.name_ar=$('#nvname').value||id;body.gender=$('#nvg').value;body.base_on=$('#nvbase').value||null}
+    await jpost('/api/voices/'+id+'/reference/commit',body);$('#nvok').textContent='تم الحفظ ✔ — جرّب التوليد بهذه الشخصية.';REF=null;await load()}catch(e){$('#nverr').textContent=e.message}};
 
 // ---------------- lexicon
 async function lexLoad(){const d=await api('/api/lexicon');S.lex=d.user_entries||[];lexRender();$('#lexok').textContent=`${d.builtin_count} مدخل افتراضي مدمج.`}

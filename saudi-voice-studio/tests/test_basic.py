@@ -7,6 +7,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ["SVS_HOME"] = str(Path(__file__).resolve().parent / "_tmp_home")
 os.environ["SVS_TOKEN"] = "t"
+os.environ["SVS_VERIFY"] = "off"
+os.environ["SVS_ASR"] = "off"
+os.environ["SVS_SEMANTIC"] = "off"   # fast, offline unit tests (semantic checks live in test_semantic_slow.py)   # tests never load the speech recognizer
 
 from svs import text_ar  # noqa: E402
 
@@ -40,7 +43,8 @@ def test_voices_and_dialects():
 def test_create_delete_voice():
     from svs import voices
     v = voices.create_voice("test_voice", "تجربة", base_on="narrator_deep")
-    assert v["id"] == "test_voice" and v["fx"] == voices.get_voice("narrator_deep")["fx"]
+    base = {k: x for k, x in voices.get_voice("narrator_deep")["fx"].items() if k != "pitch_st"}
+    assert v["id"] == "test_voice" and v["fx"] == base      # identity shift is never inherited
     voices.delete_voice("test_voice")
     try:
         voices.get_voice("test_voice")
