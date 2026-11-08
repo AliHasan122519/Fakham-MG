@@ -40,6 +40,8 @@ table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{padding:5px 4px
 .ab{display:flex;gap:8px;margin-top:8px}.ab button{flex:1}
 .ab button.on{background:var(--acc);color:#04210f;border-color:var(--acc)}
 .v{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:10px 0;border-top:1px solid var(--line)}.v:first-child{border-top:0}
+.nv{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px;margin-top:8px;border:1px solid var(--line);border-radius:12px;background:var(--card2);cursor:pointer}
+.nv.sel{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc)}.nv .t{font-weight:700}.nv .n{font-size:.78rem;color:var(--mute)}
 </style>
 </head>
 <body>
@@ -60,6 +62,11 @@ table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{padding:5px 4px
     </div>
     <div class="err" id="oberr"></div>
   </div>
+  <div class="card" id="narr">
+    <b>الراوي</b> <span class="note">اضغط على راوٍ لاختياره، و🔊 لتسمعه</span>
+    <div id="narrlist"></div>
+    <audio id="narraud" controls class="hide"></audio>
+  </div>
   <div class="card" id="mainc">
     <b id="mainttl">٢ · اكتب النص</b>
     <textarea id="htext" placeholder="اكتب أو الصق النص العربي هنا…"></textarea>
@@ -67,8 +74,7 @@ table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{padding:5px 4px
     <div class="bar hide" id="hbar"><i id="hbarf"></i></div>
     <div class="note" id="hmsg"></div><div class="err" id="herr"></div>
     <details><summary>خيارات</summary>
-      <div class="row"><div><label for="hvoice">الصوت</label><select id="hvoice"></select></div>
-      <div><label for="hdialect">اللهجة</label><select id="hdialect"></select></div></div>
+      <label for="hdialect">اللهجة</label><select id="hdialect"></select>
       <label><input id="hmax" type="checkbox"> جودة قصوى (أبطأ: يجرّب عدة نسخ ويختار الأقرب لصوتك)</label>
       <label><input id="hreview" type="checkbox"> أريد مراجعة الخطة قبل التوليد</label>
     </details>
@@ -406,10 +412,20 @@ function homeInit(){
   const own=S.voices.find(v=>v.is_default&&v.reference_source==='own');
   $('#ob').classList.toggle('hide',!!own);
   $('#mainttl').textContent=own?'اكتب النص':'٢ · اكتب النص';
-  const vs=[...S.voices].sort((a,b)=>(b.is_default?1:0)-(a.is_default?1:0));
-  opt($('#hvoice'),vs.map(v=>[v.id,v.name_ar+(v.is_default?' (افتراضي)':'')]));
   opt($('#hdialect'),[['','تلقائي'],...Object.entries(S.dialects).filter(([k,x])=>x.available!==false).map(([k,x])=>[k,x.name_ar])]);
-  if(own)$('#hvoice').value=own.id}
+  const note={own:'صوتك المرفوع',derived:'مبني على صوتك',demo:'مقطع تجريبي (دقة أقل)'};
+  const items=[];if(own)items.push({id:own.id,name:'صوتي',n:'صوتك المرفوع — الأقرب للأصل',listen:true});
+  items.push({id:'auto',name:'تلقائي',n:'يختار الراوي المناسب حسب نوع النص',listen:false});
+  S.voices.filter(v=>v.builtin).forEach(v=>items.push({id:v.id,name:v.name_ar,n:note[v.reference_source]||'',listen:true}));
+  if(!S.sel||!items.some(i=>i.id===S.sel))S.sel=own?own.id:'auto';
+  $('#narrlist').innerHTML=items.map(i=>`<div class="nv ${i.id===S.sel?'sel':''}" data-id="${esc(i.id)}"><div><div class="t">${esc(i.name)}</div><div class="n">${esc(i.n)}</div></div>${i.listen?`<button class="btn ghost sm" data-l="${esc(i.id)}">🔊 استمع</button>`:''}</div>`).join('');
+  $$('#narrlist .nv').forEach(el=>el.onclick=e=>{if(e.target.closest('[data-l]'))return;S.sel=el.dataset.id;$$('#narrlist .nv').forEach(x=>x.classList.toggle('sel',x===el))});
+  $$('#narrlist [data-l]').forEach(b=>b.onclick=()=>listen(b.dataset.l,b))}
+async function listen(id,btn){const orig=btn.textContent;btn.disabled=true;btn.textContent='⏳';$('#herr').textContent='';
+  try{const r=await jpost('/api/voices/'+id+'/sample',{});
+    if(r.job){for(;;){await new Promise(x=>setTimeout(x,2000));const j=await api('/api/jobs/'+r.job);if(j.state==='error')throw new Error(j.error);if(j.state==='done')break;btn.textContent='⏳ '+Math.round(j.progress*100)+'%'}}
+    const a=$('#narraud');a.classList.remove('hide');a.src=q('/files/sample/'+id+'.mp3?_='+Date.now());a.play().catch(()=>{})}
+  catch(e){$('#herr').textContent=e.message}finally{btn.disabled=false;btn.textContent=orig}}
 let OB=null;
 $('#obfile').onchange=async()=>{$('#oberr').textContent='';$('#obrep').classList.add('hide');const f=$('#obfile').files[0];if(!f)return;
   $('#obmsgs').textContent='';$('#oberr').textContent='⏳ أفحص المقطع وأفرّغه آليًا…';
@@ -426,7 +442,7 @@ $('#obuse').onclick=async()=>{$('#oberr').textContent='';
 $('#hgo').onclick=async()=>{$('#herr').textContent='';$('#hres').classList.add('hide');const text=$('#htext').value.trim();
   if(!text){$('#herr').textContent='اكتب نصًا أولًا.';return}
   $('#hgo').disabled=true;$('#hbar').classList.remove('hide');$('#hbarf').style.width='3%';$('#hmsg').textContent='⏳ أبدأ…';
-  try{const body={text,voice:$('#hvoice').value||null,dialect:$('#hdialect').value||null,max_quality:$('#hmax').checked,review:$('#hreview').checked};
+  try{const body={text,voice:S.sel||null,dialect:$('#hdialect').value||null,max_quality:$('#hmax').checked,review:$('#hreview').checked};
     const r=await jpost('/api/auto',body);
     if(r.segments){S.plan=r;S.take=null;renderPlan();showAdv();tab('plan');return}
     for(;;){await new Promise(x=>setTimeout(x,1500));const j=await api('/api/jobs/'+r.job);$('#hbarf').style.width=Math.max(3,j.progress*100)+'%';$('#hmsg').textContent='⏳ '+(j.message||'');

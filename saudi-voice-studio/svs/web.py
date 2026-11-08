@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
-from . import auto, config, delivery, enhance, history, jobs, plan as planmod, pronounce, refaudio, render, studio, voices
+from . import auto, config, delivery, enhance, samples, history, jobs, plan as planmod, pronounce, refaudio, render, studio, voices
 from .engine import ENGINE, EngineUnavailable
 
 app = FastAPI(title="Saudi Voice Studio", docs_url=None, redoc_url=None)
@@ -149,6 +149,8 @@ class AutoReq(BaseModel):
 def api_auto(req: AutoReq):
     """The one-button path: smart enhancement + generation in the default voice. review=true returns the plan instead."""
     voice = req.voice or voices.default_voice_id()
+    if voice == "auto" and req.review:
+        voice = voices.default_voice_id()
     if req.review:
         try:
             return enhance.smart_enhance(req.text, voice=voice, dialect=req.dialect, compare_raw=False)
@@ -157,11 +159,35 @@ def api_auto(req: AutoReq):
     if jobs.running_count() >= jobs.MAX_RUNNING:
         raise HTTPException(429, "توجد مهام توليد قيد التنفيذ؛ انتظر حتى تنتهي.")
     try:
-        voices.get_voice(voice)
+        if voice != "auto":                # "auto" = narrator chosen from the detected text type
+            voices.get_voice(voice)
     except (KeyError, ValueError) as e:
         raise HTTPException(400, str(e))
     return {"job": jobs.start(lambda progress=None, **kw: auto.run(progress=progress, **kw),
                               text=req.text, voice=voice, dialect=req.dialect, max_quality=req.max_quality)}
+
+
+@app.post("/api/voices/{voice_id}/sample", dependencies=[Depends(auth)])
+def api_sample(voice_id: str):
+    """🔊 narrator preview. Cached → instant; otherwise a job (first press only)."""
+    try:
+        voices.check_id(voice_id)
+        voices.get_voice(voice_id)
+    except (ValueError, KeyError) as e:
+        raise HTTPException(400, str(e))
+    if samples.cached(voice_id):
+        return {"cached": True, "url": f"/files/sample/{voice_id}.mp3"}
+    if jobs.running_count() >= jobs.MAX_RUNNING:
+        raise HTTPException(429, "توجد مهام قيد التنفيذ؛ انتظر.")
+    return {"job": jobs.start(lambda progress=None, **kw: samples.make(progress=progress, **kw), voice_id=voice_id)}
+
+
+@app.get("/files/sample/{voice_id}.mp3", dependencies=[Depends(auth)])
+def api_sample_file(voice_id: str):
+    try:
+        return FileResponse(samples.sample_file(voice_id), media_type="audio/mpeg")
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(404, str(e))
 
 
 class DefaultReq(BaseModel):

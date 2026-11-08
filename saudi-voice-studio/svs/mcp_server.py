@@ -19,7 +19,7 @@ from urllib.parse import quote, urlparse
 
 from mcp.server.mcpserver import MCPServer
 
-from . import auto, config, delivery, enhance, history, jobs, plan as planmod, pronounce, refaudio, render, studio, voices
+from . import auto, config, delivery, enhance, samples, history, jobs, plan as planmod, pronounce, refaudio, render, studio, voices
 from .engine import ENGINE
 
 mcp = MCPServer(
@@ -140,6 +140,19 @@ def regenerate_sentence(take_id: str, segment_id: str, emotion: str = "", spoken
 
 
 @mcp.tool()
+def narrator_sample(voice: str, wait_seconds: int = 100) -> dict:
+    """عينة صوتية قصيرة للراوي (للاستماع قبل الاختيار). أول مرة تُولَّد (دقيقة على CPU) ثم تُخزَّن."""
+    voices.get_voice(voice)
+    if samples.cached(voice):
+        return {"url": f"{config.PUBLIC_URL}/files/sample/{voice}.mp3" + (("?token=" + quote(config.TOKEN)) if config.TOKEN else ""), "cached": True}
+    jid = jobs.start(lambda progress=None, **kw: samples.make(progress=progress, **kw), voice_id=voice)
+    j = jobs.wait(jid, max(0, min(wait_seconds, 110)))
+    if j["state"] == "done":
+        return {"url": f"{config.PUBLIC_URL}/files/sample/{voice}.mp3" + (("?token=" + quote(config.TOKEN)) if config.TOKEN else ""), "cached": False}
+    return {"state": j["state"], "job": jid, "error": j.get("error"), "hint": "ما زالت العينة قيد التوليد؛ كرّر الاستدعاء بعد قليل."}
+
+
+@mcp.tool()
 def get_job(job_id: str, wait_seconds: int = 30) -> dict:
     """حالة مهمة توليد سابقة (وروابط التنزيل عند اكتمالها)."""
     if not jobs.get(job_id):
@@ -182,7 +195,8 @@ def list_voices() -> dict:
     return {"voices": vs, "dialects": {k: {"name_ar": d["name_ar"], "native": d["native"], "note": d["note"]}
                                       for k, d in voices.dialects().items()},
             "emotions": {k: e["name_ar"] for k, e in voices.emotions().items()},
-            "reference_source_meaning": {"own": "مقطعك المصرّح به", "demo": "مقطع تجريبي مرفق بحزمة habibi-tts (لتجربة النظام فقط)"}}
+            "reference_source_meaning": {"own": "مقطعك المصرّح به", "derived": "راوٍ مبني على صوتك (إزاحة هوية + أسلوب)", "demo": "مقطع تجريبي مرفق بحزمة habibi-tts (لتجربة النظام فقط)"},
+            "default_voice": voices.default_voice_id(), "tip": "voice='auto' يختار الراوي حسب نوع النص"}
 
 
 @mcp.tool()

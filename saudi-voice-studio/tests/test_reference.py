@@ -278,3 +278,62 @@ def test_gated_diacritics_prefers_plain_when_clearer(monkeypatch):
     s0["spoken"] = s0["vocalized"]
     take = render.render(p, synth_fn=synth)
     assert take["segments"][0]["diacritics"] == "dropped" and take["intelligibility"]["s1"] == 0.97
+
+
+def test_narrators_derive_from_own_voice_and_no_recursion():
+    """Regression: list_voices → own_base → default_voice_id → list_voices used to recurse forever (hang)."""
+    import signal
+    from svs import voices
+    res = refaudio.analyze_upload(ASSETS / "Najdi.wav", TEXT["Najdi.wav"], use_asr=False)
+    voices.create_voice("my_voice", "صوتي")
+    refaudio.commit("my_voice", res["preview_id"], res["transcript"])
+    signal.alarm(20)                                       # a hang would kill the test instead of freezing the suite
+    try:
+        lv = {v["id"]: v for v in voices.list_voices()}
+    finally:
+        signal.alarm(0)
+    assert lv["my_voice"]["reference_source"] == "own" and lv["my_voice"]["gender"] == "male"
+    for pid in ("narrator_deep", "promo_energetic", "anchor_formal", "documentary_cinematic"):
+        assert lv[pid]["reference_source"] == "derived"
+        assert voices.reference_for(voices.get_voice(pid), "najdi")[2] == "derived"
+    assert lv["narrator_female"]["reference_source"] == "demo"          # a male base is never used for the female narrator
+    voices.delete_voice("my_voice")
+    assert {v["reference_source"] for v in voices.list_voices() if v["builtin"]} == {"demo"}
+
+
+def test_sample_endpoint_auth_cache_and_name_guards():
+    from fastapi.testclient import TestClient
+    from svs import web
+    c = TestClient(web.app)
+    H = {"x-svs-token": "t"}
+    assert c.post("/api/voices/narrator_deep/sample").status_code == 401
+    assert c.post("/api/voices/..%2fx/sample", headers=H).status_code in (400, 404)
+    assert c.post("/api/voices/nope_voice/sample", headers=H).status_code == 400
+    assert c.get("/files/sample/narrator_deep.mp3", headers=H).status_code == 404       # nothing generated yet
+    assert c.get("/files/sample/../x.mp3", headers=H).status_code in (400, 404)
+    assert c.get("/files/sample/narrator_deep.mp3").status_code == 401
+
+
+def test_auto_voice_picks_narrator_by_genre(monkeypatch):
+    from svs import auto, enhance, render
+    seen = {}
+    monkeypatch.setattr(render, "render", lambda plan, **kw: seen.setdefault("voice", plan["voice"]) and {"ok": 1})
+    auto.run("لا تفوت العرض الحصري، احجز الآن واحصل على خصم خاص!", voice="auto")
+    assert seen["voice"] in ("promo_energetic", "narrator_deep")        # ad → promo narrator when available, else default
+
+
+def test_api_auto_accepts_auto_narrator():
+    from fastapi.testclient import TestClient
+    from svs import jobs, web
+    c = TestClient(web.app)
+    H = {"x-svs-token": "t"}
+    started = {}
+    import svs.auto as auto_mod
+    orig = jobs.start
+    jobs.start = lambda fn=None, **kw: started.setdefault("kw", kw) and "job123"
+    try:
+        r = c.post("/api/auto", headers=H, json={"text": "لا تفوت العرض الحصري!", "voice": "auto"})
+    finally:
+        jobs.start = orig
+    assert r.status_code == 200 and started["kw"]["voice"] == "auto"
+    assert c.post("/api/auto", headers=H, json={"text": "نص", "voice": "auto", "review": True}).status_code == 200

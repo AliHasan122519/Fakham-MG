@@ -381,6 +381,16 @@ def commit(voice_id: str, preview_id: str, transcript: str, emotion: str | None 
     dst = config.USER_REFS / f"{voice_id}{suffix}.wav"
     shutil.copyfile(src, dst)
     (config.USER_REFS / f"{voice_id}{suffix}.txt").write_text(transcript, encoding="utf-8")
+    if not emotion:
+        try:                              # estimate gender from pitch so derived narrators pick a matching base voice
+            g = estimate_gender(sf.read(str(dst), dtype="float32")[0])
+            jp = config.USER_VOICES / f"{voice_id}.json"
+            if jp.is_file():
+                vj = json.loads(jp.read_text(encoding="utf-8"))
+                vj["gender"] = g
+                jp.write_text(json.dumps(vj, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
     if not emotion:                       # the first voice you add with your own reference becomes the default voice
         try:
             if not voices._DEFAULT_FILE.exists():
@@ -388,6 +398,12 @@ def commit(voice_id: str, preview_id: str, transcript: str, emotion: str | None 
         except Exception:
             pass
     return dst
+
+
+def estimate_gender(x: np.ndarray) -> str:
+    """male/female from median pitch (≥165 Hz → female). A rough rule, used only to pick a matching base voice."""
+    f0 = audio._f0_track(audio_resample16(x))
+    return "female" if len(f0) > 10 and float(np.median(f0)) >= 165 else "male"
 
 
 def looks_like_speech(wave: np.ndarray) -> dict:

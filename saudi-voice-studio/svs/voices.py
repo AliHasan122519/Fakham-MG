@@ -90,7 +90,9 @@ def default_voice_id() -> str:
     """The voice used when none is named: the user's own (default) voice if set and still present, else narrator_deep."""
     try:
         vid = _DEFAULT_FILE.read_text(encoding="utf-8").strip()
-        if vid and _ID_RE.match(vid) and any(v["id"] == vid for v in list_voices()):
+        # NOTE: must not call list_voices() (list_voices → own_base → default_voice_id would recurse forever)
+        if vid and _ID_RE.match(vid) and ((config.USER_VOICES / f"{vid}.json").is_file()
+                                          or vid in {x["id"] for x in _presets()["voices"]}):
             return vid
     except OSError:
         pass
@@ -101,6 +103,21 @@ def set_default_voice(voice_id: str) -> None:
     check_id(voice_id)
     get_voice(voice_id)
     _DEFAULT_FILE.write_text(voice_id, encoding="utf-8")
+
+
+def own_base(gender: str | None) -> tuple[Path, str] | None:
+    """The user's default voice (own reference) as a base for derived narrators — only if its estimated gender matches."""
+    try:
+        dv = default_voice_id()
+        if dv == "narrator_deep":
+            return None
+        raw = json.loads((config.USER_VOICES / f"{dv}.json").read_text(encoding="utf-8"))
+        ref, txt = _resolve_ref(raw), _ref_text(raw)
+        if ref and txt and (gender is None or raw.get("gender", "male") == gender):
+            return ref, txt
+    except Exception:
+        pass
+    return None
 
 
 def list_voices() -> list[dict]:
@@ -116,6 +133,8 @@ def list_voices() -> list[dict]:
         ref = _resolve_ref(v)
         v["has_reference"] = bool(ref and _ref_text(v))
         v["reference_source"] = "own" if v["has_reference"] else ("demo" if demo_reference(v.get("ref_id") or v.get("default_dialect", "najdi")) else "none")
+        if v.get("derive_from_own") and not v["has_reference"] and own_base(v.get("gender")):
+            v["reference_source"] = "derived"
         v["ready"] = v["reference_source"] != "none"
         v.pop("ref_audio", None)
         v["emotion_refs"] = sorted(f.name.split(".")[1] for f in config.USER_REFS.glob(f"{v['id']}.*.wav"))
@@ -152,6 +171,10 @@ def reference_for(v: dict, dialect: str, emotion: str | None = None) -> tuple[Pa
             return wav, txt.read_text(encoding="utf-8").strip(), "own-emotion"
     if v.get("_ref_path") and v.get("_ref_text"):
         return v["_ref_path"], v["_ref_text"], "own"
+    if v.get("derive_from_own"):          # narrators are built on YOUR voice (high-fidelity clip) when its gender matches
+        ob = own_base(v.get("gender"))
+        if ob:
+            return ob[0], ob[1], "derived"
     d = demo_reference(v.get("ref_id") or dialect)
     if d:
         return d[0], d[1], "demo"
