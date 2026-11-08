@@ -24,7 +24,7 @@ CF_SHA256 = "1f99fb518b83dec2ba8d870a7cc991d82a77e6196295a3d2754ba17ab9f91872"
 UV_PIN = "uv==0.13.7"
 PINS = ["torch==2.8.0", "torchaudio==2.8.0", "habibi-tts==0.1.1", "mcp==2.3.0", "fastapi==0.162.2",
         "uvicorn==0.54.0", "python-multipart==0.0.33", "soundfile==0.14.0", "huggingface_hub==1.33.0",
-        "transformers==5.22.2", "faster-whisper==1.2.1"]
+        "transformers==5.22.2", "faster-whisper==1.2.1", "speechbrain==1.1.2"]
 EXP_PINS = ["torch==2.6.0", "torchaudio==2.6.0", "numpy>=2.0.0", "librosa==0.11.0", "s3tokenizer==0.3.0", "transformers==5.2.0",
             "diffusers==0.29.0", "resemble-perth==1.0.1", "conformer==0.3.2", "safetensors==0.5.3", "spacy-pkuseg==1.0.2",
             "pykakasi==2.3.0", "pyloudnorm==0.2.0", "omegaconf==2.4.0", "huggingface_hub==1.33.0", "soundfile==0.14.0",
@@ -132,7 +132,7 @@ def main():
     # matplotlib_inline) فينهار توليد الصوت. نفرض backend بلا واجهة لكل العمليات الفرعية، ونتجاوز قيمة Colab.
     env["MPLBACKEND"] = "Agg"
     if not ENABLE_SMART_ENHANCEMENT:
-        env["SVS_SEMANTIC"], env["SVS_ASR"] = "off", "off"
+        env["SVS_SEMANTIC"], env["SVS_ASR"], env["SVS_SPEAKER"] = "off", "off", "off"
 
     # 3) بيئة بايثون معزولة + المكتبات
     step(3, "تجهيز بيئة بايثون معزولة (أول مرة 3–8 دقائق؛ سترى التقدّم)…")
@@ -166,7 +166,7 @@ def main():
     probe = subprocess.run([str(VPY), "-c", "import torch;print(('GPU — '+torch.cuda.get_device_name(0)) if torch.cuda.is_available() else 'CPU')"],
                            capture_output=True, text=True, env=env).stdout.strip()
     say("   الجهاز: " + (probe if probe.startswith("GPU") else "CPU فقط (بطيء ~10× مدة الصوت). لتجربة GPU: Runtime ← Change runtime type ← T4 GPU ثم أعد التشغيل."))
-    which = (["najdi"] + (["saudi"] if DOWNLOAD_SAUDI_MODEL else []) + (["semantic", "whisper"] if ENABLE_SMART_ENHANCEMENT else [])
+    which = (["najdi"] + (["saudi"] if DOWNLOAD_SAUDI_MODEL else []) + (["semantic", "whisper", "speaker"] if ENABLE_SMART_ENHANCEMENT else [])
              + (["expressive"] if ENABLE_EXPRESSIVE_ENGINE else []))
     run([str(VPY), str(APP / "scripts/download_models.py"), *which], "تنزيل النماذج من Hugging Face (قد يستغرق دقائق)", env=env, cwd=APP)
 

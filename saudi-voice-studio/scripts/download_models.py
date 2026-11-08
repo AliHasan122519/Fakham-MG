@@ -1,5 +1,5 @@
 """Download the free open weights from Hugging Face (no key, no account).
-usage: download_models.py [najdi] [saudi] [semantic] [whisper] [expressive]   (~1.3, ~1.3, ~0.5, ~0.5, ~3.3 GB)"""
+usage: download_models.py [najdi] [saudi] [semantic] [whisper] [speaker] [expressive]   (~1.3, ~1.3, ~0.5, ~0.5, ~3.3 GB)"""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -15,6 +15,11 @@ for key in which:
         for cls in (AutoTokenizer, AutoModel):
             cls.from_pretrained("intfloat/multilingual-e5-small", cache_dir=str(config.MODEL_DIR / "hf"))
         print("-> semantic model ready")
+        continue
+    if key == "speaker":                       # speaker-embedding model that measures voice similarity (Apache-2.0, ~85 MB)
+        from speechbrain.inference.speaker import EncoderClassifier
+        EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb", savedir=str(config.MODEL_DIR / "ecapa"))
+        print("-> speaker model ready")
         continue
     if key == "whisper":                       # speech recognizer used as a safety net (MIT, ~460 MB)
         from faster_whisper.utils import download_model

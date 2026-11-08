@@ -25,6 +25,9 @@ description: استوديو تعليق صوتي سعودي مجاني ومفتو
 narration سرد · ad إعلان · news نشرة · documentary وثائقي · story حكاية · conversation حوار.
 المشاعر: neutral joy sadness excitement calm confidence grandeur empathy suspense warning formal.
 
+## الصوت الافتراضي
+أول صوت يحفظه المستخدم بمقطعه الخاص يصبح **الافتراضي**؛ اترك `voice` فارغًا في `generate_voiceover` فيعمل المسار التلقائي الكامل بصوته (هويته مقفولة: لا تغيير نبرة). لا تحاول «تحسين» النبرة لصوته.
+
 ## المقاطع المرجعية
 قبل `set_voice_reference`/`clone_voice` استخدم **`analyze_reference`** لفحص المقطع (ضجيج/قطع/كلام/تطابق النص). المقاطع التالفة تُرفض برسالة؛ أبلغ المستخدم بالسبب بدل إعادة المحاولة. اترك `transcript` فارغًا ليُفرَّغ آليًا وراجعه.
 

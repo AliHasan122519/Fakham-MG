@@ -47,6 +47,42 @@ table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{padding:5px 4px
   <h1>استوديو الصوت <span>السعودي</span></h1>
   <p class="sub">أداء صوتي ذكي: تحليل النص ← خطة إلقاء ← صوت</p>
 </header>
+<section id="t-home">
+  <div class="card" id="ob">
+    <b>١ · صوتك</b>
+    <p class="note">ارفع مقطعًا صوتيًا لصوت تريد أن يقرأ به الاستوديو (٦–١٠ ثوانٍ، واضح بلا ضجيج). مرة واحدة فقط — كل شيء بعدها تلقائي.</p>
+    <input id="obfile" type="file" accept="audio/*">
+    <div id="obrep" class="hide">
+      <div id="obbadge" style="margin-top:8px"></div><div id="obmsgs" class="note"></div>
+      <audio id="obaud" controls preload="none"></audio>
+      <label><input id="obauth" type="checkbox"> أُقرّ بأنني أملك حق استخدام هذا الصوت أو لديّ إذن صاحبه</label>
+      <button class="btn" id="obuse">استخدم هذا الصوت</button>
+    </div>
+    <div class="err" id="oberr"></div>
+  </div>
+  <div class="card" id="mainc">
+    <b id="mainttl">٢ · اكتب النص</b>
+    <textarea id="htext" placeholder="اكتب أو الصق النص العربي هنا…"></textarea>
+    <button class="btn" id="hgo">✨ ولّد الصوت</button>
+    <div class="bar hide" id="hbar"><i id="hbarf"></i></div>
+    <div class="note" id="hmsg"></div><div class="err" id="herr"></div>
+    <details><summary>خيارات</summary>
+      <div class="row"><div><label for="hvoice">الصوت</label><select id="hvoice"></select></div>
+      <div><label for="hdialect">اللهجة</label><select id="hdialect"></select></div></div>
+      <label><input id="hmax" type="checkbox"> جودة قصوى (أبطأ: يجرّب عدة نسخ ويختار الأقرب لصوتك)</label>
+      <label><input id="hreview" type="checkbox"> أريد مراجعة الخطة قبل التوليد</label>
+    </details>
+  </div>
+  <div class="card hide" id="hres">
+    <b>النتيجة</b>
+    <audio id="hplayer" controls preload="auto"></audio>
+    <div class="row" style="margin-top:8px"><a class="btn sm" id="hdl" download>⬇ تنزيل MP3</a><a class="btn sm ghost" id="hdlw" download>⬇ WAV</a></div>
+    <div class="note" id="hmeta" style="margin-top:8px"></div>
+  </div>
+  <p class="note" style="text-align:center"><a href="#" id="toAdv" style="color:var(--mute)">⚙ متقدم</a></p>
+</section>
+<div id="adv" class="hide">
+<p class="note"><a href="#" id="toHome" style="color:var(--acc)">← العودة للاستوديو البسيط</a></p>
 <nav id="nav">
   <button data-t="compose" class="on">١ النص</button>
   <button data-t="plan">٢ الخطة</button>
@@ -165,6 +201,7 @@ table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{padding:5px 4px
 
 <section id="t-sys" class="hide"><div class="card"><b>حالة المحرك</b><pre id="sys" class="note" style="white-space:pre-wrap;direction:ltr;text-align:left"></pre></div></section>
 
+</div>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const esc=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -360,7 +397,48 @@ $('#lexsave').onclick=async()=>{const r=await api('/api/lexicon',{method:'PUT',h
 $('#pvgo').onclick=async()=>{const r=await jpost('/api/pronounce',{text:$('#pv').value,dialect:$('#dialect').value||'najdi',light_dialect:$('#light').checked});
   $('#pvout').innerHTML=`<b>${esc(r.spoken)}</b>`+(r.changes.length?'<br>'+r.changes.map(c=>`${esc(c.from)} ← ${esc(c.to)}`).join(' · '):'')};
 async function sysLoad(){$('#sys').textContent=JSON.stringify(await api('/api/status'),null,2)}
-load().catch(e=>{$('#aerr').textContent=e.message});
+
+// ---------------- simple home (one-button automatic flow)
+function showHome(){$('#t-home').classList.remove('hide');$('#adv').classList.add('hide');window.scrollTo(0,0)}
+function showAdv(){$('#t-home').classList.add('hide');$('#adv').classList.remove('hide');tab('compose')}
+$('#toAdv').onclick=e=>{e.preventDefault();showAdv()};$('#toHome').onclick=e=>{e.preventDefault();showHome()};
+function homeInit(){
+  const own=S.voices.find(v=>v.is_default&&v.reference_source==='own');
+  $('#ob').classList.toggle('hide',!!own);
+  $('#mainttl').textContent=own?'اكتب النص':'٢ · اكتب النص';
+  const vs=[...S.voices].sort((a,b)=>(b.is_default?1:0)-(a.is_default?1:0));
+  opt($('#hvoice'),vs.map(v=>[v.id,v.name_ar+(v.is_default?' (افتراضي)':'')]));
+  opt($('#hdialect'),[['','تلقائي'],...Object.entries(S.dialects).filter(([k,x])=>x.available!==false).map(([k,x])=>[k,x.name_ar])]);
+  if(own)$('#hvoice').value=own.id}
+let OB=null;
+$('#obfile').onchange=async()=>{$('#oberr').textContent='';$('#obrep').classList.add('hide');const f=$('#obfile').files[0];if(!f)return;
+  $('#obmsgs').textContent='';$('#oberr').textContent='⏳ أفحص المقطع وأفرّغه آليًا…';
+  try{const fd=new FormData();fd.append('ref',f);fd.append('ref_text','');OB=await api('/api/reference/analyze',{method:'POST',body:fd});$('#oberr').textContent='';
+    const v=OB.verdict,st=stateAr[v.status];$('#obrep').classList.remove('hide');
+    $('#obbadge').innerHTML=`<span class="pill ${st[1]}">${st[0]}</span> <b>الجودة ${v.score}/100</b>`;
+    $('#obmsgs').innerHTML=(v.messages.length?v.messages.map(m=>'• '+esc(m)).join('<br>'):'المقطع ممتاز.')+(OB.transcript?`<br>سمعتُ: «${esc(OB.transcript)}»`:'');
+    if(OB.preview_id)$('#obaud').src=q('/files/ref/'+OB.preview_id+'/processed.wav');
+    $('#obuse').disabled=(v.status==='reject'||!OB.preview_id)}catch(e){$('#oberr').textContent=e.message}};
+$('#obuse').onclick=async()=>{$('#oberr').textContent='';
+  try{if(!$('#obauth').checked)throw new Error('يجب الإقرار بحق استخدام الصوت.');if(!OB||!OB.preview_id)throw new Error('ارفع مقطعًا صالحًا أولًا.');
+    const body={preview_id:OB.preview_id,ref_text:OB.transcript||'',name_ar:'صوتي'};if(!body.ref_text)throw new Error('لم أستطع تفريغ المقطع؛ اكتب النص من «متقدم ← الشخصيات».');
+    await jpost('/api/voices/my_voice/reference/commit',body);await jpost('/api/default_voice',{voice_id:'my_voice'});OB=null;await load();homeInit()}catch(e){$('#oberr').textContent=e.message}};
+$('#hgo').onclick=async()=>{$('#herr').textContent='';$('#hres').classList.add('hide');const text=$('#htext').value.trim();
+  if(!text){$('#herr').textContent='اكتب نصًا أولًا.';return}
+  $('#hgo').disabled=true;$('#hbar').classList.remove('hide');$('#hbarf').style.width='3%';$('#hmsg').textContent='⏳ أبدأ…';
+  try{const body={text,voice:$('#hvoice').value||null,dialect:$('#hdialect').value||null,max_quality:$('#hmax').checked,review:$('#hreview').checked};
+    const r=await jpost('/api/auto',body);
+    if(r.segments){S.plan=r;S.take=null;renderPlan();showAdv();tab('plan');return}
+    for(;;){await new Promise(x=>setTimeout(x,1500));const j=await api('/api/jobs/'+r.job);$('#hbarf').style.width=Math.max(3,j.progress*100)+'%';$('#hmsg').textContent='⏳ '+(j.message||'');
+      if(j.state==='error')throw new Error(j.error);
+      if(j.state==='done'){const t=j.take;S.take=t;$('#hres').classList.remove('hide');$('#hplayer').src=q(`/files/${t.id}/master.mp3`);
+        $('#hdl').href=q(`/files/${t.id}/master.mp3`+(TOKEN?'&':'?')+'download=1');$('#hdlw').href=q(`/files/${t.id}/master.wav`+(TOKEN?'&':'?')+'download=1');
+        const vm=t.voice_match,vf=vm&&(vm.final!=null?vm.final:vm.mean);$('#hmeta').innerHTML=esc(`${t.seconds}ث · استغرق ${t.took}ث`)+(vm?`<br>تشابه الصوت مع مقطعك (الملف النهائي): <b>${vf.toFixed(2)}</b> <span class="note">(${esc(vm.scale)})</span>${vf<0.4?'<br><span class="warn">⚠ التشابه منخفض؛ جرّب مقطعًا مرجعيًا أوضح أو أطول قليلًا.</span>':''}`:'')
+          +((t.warnings||[]).includes('demo')?'<br><span class="warn">⚠ يستخدم مقطعًا تجريبيًا؛ ارفع صوتك في الخطوة ١.</span>':'')
+          +((t.warnings||[]).filter(w=>w.startsWith('low_intelligibility')).map(w=>`<br><span class="warn">⚠ الجملة ${esc(w.split(':')[1])} قليلة الوضوح (${esc(w.split(':')[2])}%).</span>`).join(''));
+        $('#hbarf').style.width='100%';$('#hmsg').textContent='تم ✔';break}}
+  }catch(e){$('#herr').textContent=e.message}finally{$('#hgo').disabled=false}};
+load().then(homeInit).catch(e=>{$('#herr').textContent=e.message});
 </script>
 </body>
 </html>

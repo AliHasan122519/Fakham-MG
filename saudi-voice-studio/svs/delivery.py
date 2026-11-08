@@ -83,7 +83,8 @@ def _jitter(seed_text: str, amp: float) -> tuple[float, float]:
     return r.uniform(-1, 1) * 0.03 * amp, r.uniform(-1, 1) * 0.25 * amp
 
 
-def compute(seg: dict, controls: dict, style: str, *, index: int, total: int, voice_style: str | None = None) -> dict:
+def compute(seg: dict, controls: dict, style: str, *, index: int, total: int, voice_style: str | None = None,
+            lock_identity: bool = False) -> dict:
     """Concrete parameters for one segment. `seg` needs: emotion, intensity, sentence_type, spoken/text,
     first_in_paragraph/last_in_paragraph, overrides{}. Returns dict with speed_mul, pitch_st, gain_db, pause_*."""
     c = clean_controls(controls)
@@ -140,6 +141,10 @@ def compute(seg: dict, controls: dict, style: str, *, index: int, total: int, vo
     speed *= c["speed"]
 
     ov = seg.get("overrides") or {}
+    if lock_identity:
+        # Measured (ECAPA speaker similarity vs the reference): a -0.5 semitone shift alone cost 0.07 of similarity, so
+        # voices built from YOUR reference keep their pitch untouched; emotion is carried by speed/pauses/loudness.
+        pitch = 0.0
     out = {"speed_mul": speed, "pitch_st": pitch, "gain_db": gain, "pause_before": p_before, "pause_after": p_after}
     for key, (lo, hi) in OVERRIDE_LIMITS.items():
         if ov.get(key) is not None:

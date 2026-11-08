@@ -83,6 +83,26 @@ def demo_reference(key: str) -> tuple[Path, str] | None:
         return None
 
 
+_DEFAULT_FILE = config.DATA / "default_voice.txt"
+
+
+def default_voice_id() -> str:
+    """The voice used when none is named: the user's own (default) voice if set and still present, else narrator_deep."""
+    try:
+        vid = _DEFAULT_FILE.read_text(encoding="utf-8").strip()
+        if vid and _ID_RE.match(vid) and any(v["id"] == vid for v in list_voices()):
+            return vid
+    except OSError:
+        pass
+    return "narrator_deep"
+
+
+def set_default_voice(voice_id: str) -> None:
+    check_id(voice_id)
+    get_voice(voice_id)
+    _DEFAULT_FILE.write_text(voice_id, encoding="utf-8")
+
+
 def list_voices() -> list[dict]:
     voices = {v["id"]: dict(v) for v in _presets()["voices"]}
     for f in sorted(config.USER_VOICES.glob("*.json")):
@@ -100,6 +120,12 @@ def list_voices() -> list[dict]:
         v.pop("ref_audio", None)
         v["emotion_refs"] = sorted(f.name.split(".")[1] for f in config.USER_REFS.glob(f"{v['id']}.*.wav"))
         out.append(v)
+    try:
+        dv = _DEFAULT_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        dv = ""
+    for v in out:
+        v["is_default"] = (v["id"] == dv)
     return out
 
 

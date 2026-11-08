@@ -169,7 +169,7 @@ def spectral_profile(w: np.ndarray, sr: int = SR) -> dict:
     return {"hf4": float(S[f > 4000].sum() / tot), "hf8": float(S[f > 8000].sum() / tot)}
 
 
-def master_chain(fx: dict | None, profile: dict, *, clean: bool = True, target_lufs: float = -16.0) -> str:
+def master_chain(fx: dict | None, profile: dict, *, clean: bool = False, target_lufs: float = -16.0) -> str:
     """Mastering chain, deliberately gentle so the voice keeps its character.
 
     Adaptive part: the model's vocoder output is often dull above 4 kHz (low `hf4`) or harsh/metallic around 7-9 kHz
@@ -177,17 +177,15 @@ def master_chain(fx: dict | None, profile: dict, *, clean: bool = True, target_l
     """
     fx = fx or {}
     f = ["highpass=f=70"]
-    if clean:
-        f.append("afftdn=nr=9:nf=-48:tn=0")                      # mild broadband noise reduction (≤9 dB)
+    if clean:   # off by default: model output is already clean and denoising measurably reduced speaker similarity (-0.03)
+        f.append("afftdn=nr=9:nf=-48:tn=0")
     f.append("deesser=i=0.15:m=0.5:f=0.5")
     f.append("equalizer=f=220:t=q:w=1.0:g=-1.0")                  # trim boxiness
     hf4, hf8 = profile.get("hf4", 0.03), profile.get("hf8", 0.005)
-    if hf4 < 0.02:                                                # dull → presence + air
-        f += ["equalizer=f=3200:t=q:w=1.0:g=2.0", "treble=g=2.0:f=5500:w=0.7"]
+    if hf4 < 0.02:                                                # dull → a LIGHT presence/air lift (identity-safe)
+        f += ["equalizer=f=3200:t=q:w=1.0:g=1.0", "treble=g=1.0:f=5500:w=0.7"]
     elif hf4 < 0.04:
-        f += ["equalizer=f=3200:t=q:w=1.0:g=1.2", "treble=g=0.8:f=5500:w=0.7"]
-    else:
-        f += ["equalizer=f=3200:t=q:w=1.0:g=0.5"]
+        f += ["equalizer=f=3200:t=q:w=1.0:g=0.6", "treble=g=0.4:f=5500:w=0.7"]
     if hf8 > 0.006:                                               # harsh / metallic band → tame it
         f.append(f"equalizer=f=8000:t=q:w=1.2:g={-min(3.0, 1.0 + hf8 * 200):.1f}")
     if fx.get("bass_db"):

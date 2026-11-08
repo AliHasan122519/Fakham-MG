@@ -13,6 +13,7 @@ os.environ["SVS_TOKEN"] = "t"
 os.environ["SVS_VERIFY"] = "off"
 os.environ["SVS_ASR"] = "off"
 os.environ["SVS_SEMANTIC"] = "off"
+os.environ["SVS_SPEAKER"] = "off"
 
 from svs import asr, refaudio  # noqa: E402
 
@@ -208,3 +209,72 @@ def test_notebook_payload_contains_every_data_file_the_code_reads():
     for name in referenced:
         assert f"voices/{name}" in included, f"voices/{name} is not shipped in the notebook payload"
     assert "web/index.html" in included and "scripts/download_models.py" in included
+
+
+# ---------------------------------------------------------------- one-button automatic flow
+def test_default_voice_follows_first_own_reference_and_web_auto_review():
+    from fastapi.testclient import TestClient
+    from svs import config, voices, web
+    (config.DATA / "default_voice.txt").unlink(missing_ok=True)
+    assert voices.default_voice_id() == "narrator_deep"                  # nothing of yours yet → built-in persona
+    res = refaudio.analyze_upload(ASSETS / "Najdi.wav", TEXT["Najdi.wav"], use_asr=False)
+    voices.create_voice("my_voice", "صوتي")
+    refaudio.commit("my_voice", res["preview_id"], res["transcript"])
+    assert voices.default_voice_id() == "my_voice"                       # becomes the default automatically
+    c = TestClient(web.app)
+    H = {"x-svs-token": "t"}
+    assert c.post("/api/auto", json={"text": "x"}).status_code == 401
+    r = c.post("/api/auto", headers=H, json={"text": "احذر! الطريق خطير ممنوع الاقتراب.", "review": True})
+    assert r.status_code == 200 and r.json()["voice"] == "my_voice" and r.json()["segments"]   # plan for review, in YOUR voice
+    assert c.post("/api/auto", headers=H, json={"text": ""}).status_code == 422
+    assert c.post("/api/auto", headers=H, json={"text": "نص", "voice": "nope_voice"}).status_code == 400
+    assert c.get("/api/voices", headers=H).json()["voices"][0] is not None
+    assert any(v["is_default"] for v in c.get("/api/voices", headers=H).json()["voices"])
+    voices.delete_voice("my_voice")
+    assert voices.default_voice_id() == "narrator_deep"                  # deleted → falls back safely
+
+
+def test_auto_run_uses_default_voice_and_best_of_n_is_wired(monkeypatch):
+    from svs import auto, render, voices
+    seen = {}
+    def fake_render(plan, **kw):
+        seen["voice"], seen["cand"] = plan["voice"], kw.get("candidates")
+        return {"ok": True}
+    monkeypatch.setattr(render, "render", fake_render)
+    auto.run("احذر! الطريق خطير.", max_quality=True)
+    assert seen["voice"] == voices.default_voice_id() and seen["cand"] >= 3
+
+
+def test_own_voice_locks_identity_no_pitch_shift():
+    """Measured with ECAPA speaker similarity: a -0.5 semitone shift cost 0.07. Voices built from YOUR reference are
+    never pitch-shifted; personas with demo references keep their expressive pitch."""
+    from svs import plan as planmod, voices
+    res = refaudio.analyze_upload(ASSETS / "Najdi.wav", TEXT["Najdi.wav"], use_asr=False)
+    voices.create_voice("lock_unit", "قفل")
+    refaudio.commit("lock_unit", res["preview_id"], res["transcript"])
+    own = planmod.build("احذر! الطريق خطير. ثم ساد الهدوء وعاد السلام إلى المكان.", voice="lock_unit")
+    assert own["lock_identity"] and all(s["params"]["pitch_st"] == 0 for s in own["segments"])
+    persona = planmod.build("احذر! الطريق خطير. ثم ساد الهدوء وعاد السلام إلى المكان.", voice="narrator_deep")
+    assert not persona["lock_identity"] and any(s["params"]["pitch_st"] != 0 for s in persona["segments"])
+    again = planmod.validate(own)                                          # survives the edit→recompute round trip
+    assert again["lock_identity"] and all(s["params"]["pitch_st"] == 0 for s in again["segments"])
+    voices.delete_voice("lock_unit")
+
+
+def test_gated_diacritics_prefers_plain_when_clearer(monkeypatch):
+    """When the vocalised sentence is clearly less intelligible than the plain one, the plain text is used."""
+    from svs import plan as planmod, render, voices
+    monkeypatch.setattr(render, "_verify_on", lambda: True)
+    sims = {}
+    def fake_intel(wave, spoken):
+        return 0.5 if "َ" in spoken else 0.97
+    monkeypatch.setattr(render, "_intelligibility", fake_intel)
+    import numpy as np
+    def synth(spoken, ref, ref_text, *, engine, speed, nfe, seed):
+        return (0.2 * np.sin(2 * np.pi * 150 * np.arange(24000 * 2) / 24000) * (1 + 0.1 * len(spoken) % 3)).astype("float32"), 24000
+    p = planmod.build("ذهب القوم إلى السوق في الصباح الباكر.", voice="narrator_deep", diacritics="none")
+    s0 = p["segments"][0]
+    s0["corrected"], s0["vocalized"] = "ذهب القوم إلى السوق في الصباح الباكر.", "ذَهَبَ القوم إلى السوق في الصباح الباكر."
+    s0["spoken"] = s0["vocalized"]
+    take = render.render(p, synth_fn=synth)
+    assert take["segments"][0]["diacritics"] == "dropped" and take["intelligibility"]["s1"] == 0.97

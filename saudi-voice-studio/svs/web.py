@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
-from . import config, delivery, enhance, history, jobs, plan as planmod, pronounce, refaudio, render, studio, voices
+from . import auto, config, delivery, enhance, history, jobs, plan as planmod, pronounce, refaudio, render, studio, voices
 from .engine import ENGINE, EngineUnavailable
 
 app = FastAPI(title="Saudi Voice Studio", docs_url=None, redoc_url=None)
@@ -133,6 +133,46 @@ def api_enhance(req: EnhanceReq):
         return enhance.smart_enhance(req.text, voice=req.voice, dialect=req.dialect, style=req.style or None, mode=req.mode,
                                      controls=req.controls, emotion=req.emotion, diacritics=req.diacritics,
                                      compare_raw=req.compare_raw)
+    except (ValueError, KeyError) as e:
+        raise HTTPException(400, str(e))
+
+
+class AutoReq(BaseModel):
+    text: str = Field(min_length=1, max_length=6000)
+    voice: str | None = None
+    dialect: str | None = None
+    max_quality: bool = False
+    review: bool = False
+
+
+@app.post("/api/auto", dependencies=[Depends(auth)])
+def api_auto(req: AutoReq):
+    """The one-button path: smart enhancement + generation in the default voice. review=true returns the plan instead."""
+    voice = req.voice or voices.default_voice_id()
+    if req.review:
+        try:
+            return enhance.smart_enhance(req.text, voice=voice, dialect=req.dialect, compare_raw=False)
+        except (ValueError, KeyError) as e:
+            raise HTTPException(400, str(e))
+    if jobs.running_count() >= jobs.MAX_RUNNING:
+        raise HTTPException(429, "توجد مهام توليد قيد التنفيذ؛ انتظر حتى تنتهي.")
+    try:
+        voices.get_voice(voice)
+    except (KeyError, ValueError) as e:
+        raise HTTPException(400, str(e))
+    return {"job": jobs.start(lambda progress=None, **kw: auto.run(progress=progress, **kw),
+                              text=req.text, voice=voice, dialect=req.dialect, max_quality=req.max_quality)}
+
+
+class DefaultReq(BaseModel):
+    voice_id: str
+
+
+@app.post("/api/default_voice", dependencies=[Depends(auth)])
+def api_default_voice(req: DefaultReq):
+    try:
+        voices.set_default_voice(req.voice_id)
+        return {"ok": True, "default": req.voice_id}
     except (ValueError, KeyError) as e:
         raise HTTPException(400, str(e))
 

@@ -19,7 +19,7 @@ from typing import Callable
 import numpy as np
 import soundfile as sf
 
-from . import asr, audio, config, expressive, history, plan as planmod, refaudio, voices
+from . import asr, audio, config, expressive, history, plan as planmod, refaudio, speaker, voices
 from .engine import ENGINE
 
 CACHE = config.DATA / "cache"
@@ -68,6 +68,35 @@ def audio_resample(path: Path) -> np.ndarray:
     return np.frombuffer(raw, dtype=np.float32)
 
 
+_REF_EMB: dict = {}
+
+
+def _ref_embedding(ref: Path):
+    key = (str(ref), int(Path(ref).stat().st_mtime))
+    if key not in _REF_EMB:
+        x = sf.read(str(ref), dtype="float32")[0]
+        x = x if x.ndim == 1 else x[:, 0]
+        _REF_EMB[key] = speaker.embed(refaudio.audio_resample16(x))
+    return _REF_EMB[key]
+
+
+def _spk_sim(wave: np.ndarray, ref: Path) -> float | None:
+    if not speaker.available() or len(wave) < int(1.5 * audio.SR):
+        return None
+    try:
+        return float(np.dot(_ref_embedding(ref), speaker.embed(refaudio.audio_resample16(wave))))
+    except Exception:
+        return None
+
+
+def default_candidates() -> int:
+    """Candidates per sentence. Default 1; the "max quality" option or SVS_CANDIDATES raises it (best-of-N by speaker similarity)."""
+    env = os.environ.get("SVS_CANDIDATES")
+    if env:
+        return max(1, min(5, int(env)))
+    return 1      # measured: best-of-3 raised voice similarity by only ~0.01 at 3.4x the time, so it is opt-in ("جودة قصوى")
+
+
 def _verify_on() -> bool:
     return VERIFY != "off" and asr.available()
 
@@ -114,7 +143,8 @@ def _assemble(clips: list[np.ndarray], pauses: list[tuple[float, float]], sr: in
 
 
 def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str], None] | None = None,
-           synth_fn=default_synth, parent: str | None = None, clean: bool = True, compare_raw: bool | None = None) -> dict:
+           synth_fn=default_synth, parent: str | None = None, clean: bool = False, compare_raw: bool | None = None,
+           candidates: int | None = None) -> dict:
     progress = progress or (lambda p, m: None)
     t0 = time.time()
     plan = planmod.validate(plan_in)
@@ -132,6 +162,10 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
     stats = {"cache_hits": 0}
     base_speed = float(v.get("speed", 1.0))
     n_pass = 2 if compare_raw else 1
+    if candidates is None:
+        candidates = int((plan_in.get("enhancement") or {}).get("candidates") or 1)
+    candidates = max(1, min(5, candidates))
+    match: dict[str, float] = {}
 
     def wave_for(spoken, ref, ref_text, speed, nfe, seed, *, verify, label, frac, exag=None, cfg_w=None):
         """Synthesise one sentence with cache, optional intelligibility guard and seed re-rolls."""
@@ -151,6 +185,20 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
             return np.asarray(w, dtype=np.float32), sr_
         wave, sr = once(seed)
         sim = None
+        if candidates > 1 and verify and engine != "expressive" and speaker.available():
+            # Best-of-N: keep the candidate closest to YOUR reference voice (speaker embedding) that is also intelligible.
+            def score(w):
+                sp_ = _spk_sim(w, ref)
+                it_ = _intelligibility(w, spoken) if (_verify_on() and len(spoken) >= 12) else 1.0
+                return (0.65 * (sp_ if sp_ is not None else 0.5) + 0.35 * it_), sp_, it_
+            best, (bs, _, _) = (wave, sr), score(wave)
+            for k in range(1, candidates):
+                progress(frac, f"تجربة نسخة {k + 1} من {candidates} للجملة (اختيار الأقرب لصوتك)")
+                w2, sr2 = once((int(seed) + 104729 * k) & 0x7FFFFFFF)
+                sc2 = score(w2)[0]
+                if sc2 > bs:
+                    best, bs = (w2, sr2), sc2
+            wave, sr = best
         if verify and _verify_on() and len(spoken) >= 12 and engine != "expressive":
             # Output guard: a bad/noisy reference yields babble. Check intelligibility; re-roll the seed up to twice.
             best, best_sim, tries = wave, _intelligibility(wave, spoken), 0
@@ -183,14 +231,29 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
             nfe = int(exag * 100) * 10 + int(cfg_w * 10)        # folded into the cache key
         wave, sim = wave_for(s["spoken"], ref, ref_text, speed, nfe, s["seed"], verify=True, label=f"الجملة {i + 1}",
                              frac=0.04 + 0.78 / n_pass * i / len(segs), exag=exag, cfg_w=cfg_w)
+        diac_note = None
+        if (sim is not None and engine != "expressive" and s.get("vocalized") and s.get("corrected")
+                and s["spoken"] == s["vocalized"] and s["vocalized"] != s["corrected"]):
+            # Verification-gated diacritics: measured on real generations, a diacritised word can make the model slower or
+            # less clear (e.g. «ذَهَبَ» → ASR 0.81-0.93 vs plain 0.97-1.0). Synthesize the plain text too and keep the
+            # diacritised reading only if it is not clearly less intelligible.
+            w_alt, _ = wave_for(s["corrected"], ref, ref_text, speed, nfe, s["seed"], verify=False, label="", frac=0.5)
+            sim_alt = _intelligibility(w_alt, s["corrected"])
+            if sim_alt > sim + 0.05:
+                wave, sim, diac_note = w_alt, sim_alt, "dropped"
+            else:
+                diac_note = "kept"
         if sim is not None:
             intel[s["id"]] = round(sim, 3)
             if sim < MIN_INTELLIGIBILITY:
                 warnings.append(f"low_intelligibility:{s['id']}:{int(sim * 100)}")
+        vm = _spk_sim(wave, ref)
+        if vm is not None:
+            match[s["id"]] = round(vm, 3)
         raw_clips.append(wave)
         proc_clips.append(_process_segment(wave, P, v.get("fx") or {}))
         pauses.append((P["pause_before"], P["pause_after"]))
-        seg_meta.append({"id": s["id"], "ref_source": ref_src, "speed": round(speed, 3), "nfe": nfe,
+        seg_meta.append({"id": s["id"], "ref_source": ref_src, "speed": round(speed, 3), "nfe": nfe, "diacritics": diac_note,
                          "seconds": round(len(proc_clips[-1]) / audio.SR, 2)})
 
     baseline_kind = "model_output_same_text"
@@ -235,6 +298,16 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
         tmp.unlink(missing_ok=True)
     progress(0.96, "قياس الجودة")
     m_raw, m_master = audio.metrics(d / "raw.wav"), audio.metrics(d / "master.wav")
+    final_match = None
+    if speaker.available() and segs:
+        try:   # the HEADLINE number: the finished, mastered file against your reference (per-sentence numbers are noisy when short)
+            ref0, _, _ = voices.reference_for(v, plan["dialect"], None)
+            mw, _msr = sf.read(str(d / "master.wav"), dtype="float32")
+            mw = mw if mw.ndim == 1 else mw[:, 0]
+            if len(mw) >= int(2.5 * audio.SR):
+                final_match = round(float(np.dot(_ref_embedding(ref0), speaker.embed(refaudio.audio_resample16(mw)))), 3)
+        except Exception:
+            final_match = None
     cmp_intel = None
     if compare_raw and _verify_on():
         progress(0.97, "قياس وضوح النطق قبل/بعد")
@@ -250,6 +323,9 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
         raise RenderError("الصوت الناتج غير مفهوم في كل الجمل — غالبًا المقطع المرجعي ضعيف أو مشوّش. "
                           "أعد رفع مقطع أنظف (٥–١٠ ثوانٍ، بلا ضجيج) من تبويب الشخصيات.")
     take = {"id": take_id, "parent": parent, "intelligibility": intel, "baseline_kind": baseline_kind,
+            "voice_match": ({"final": None, "mean": round(float(np.mean(list(match.values()))), 3), "min": round(float(min(match.values())), 3),
+                             "per_sentence": match, "candidates": candidates,
+                             "scale": "غير المتشابهين ≈ 0.0–0.3 · نفس المتحدث ≈ 0.7+"} if match else None),
             "intelligibility_compare": cmp_intel, "created": time.time(), "plan": plan, "segments": seg_meta,
             "files": {"master_mp3": "master.mp3", "master_wav": "master.wav", "raw_mp3": "raw.mp3",
                       "segments": {s["id"]: f"seg_{s['id']}.mp3" for s in segs}},
@@ -258,6 +334,11 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
             "engine": engine, "dialect_native": dcfg["native"], "dialect_note": dcfg["note"],
             "warnings": warnings, "took_s": round(took, 1), "realtime_factor": round(took / max(secs, 0.1), 1),
             "cache_hits": cache_hits}
+    if take.get("voice_match") is not None:
+        take["voice_match"]["final"] = final_match
+    elif final_match is not None:
+        take["voice_match"] = {"final": final_match, "mean": final_match, "min": final_match, "per_sentence": {}, "candidates": candidates,
+                               "scale": "غير المتشابهين ≈ 0.0–0.3 · نفس المتحدث ≈ 0.7+"}
     (d / "take.json").write_text(json.dumps(take, ensure_ascii=False), encoding="utf-8")
     history.add({"id": take_id, "voice": plan["voice"], "dialect": plan["dialect"],
                  "emotion": plan["mode"], "speed": plan["controls"]["speed"],

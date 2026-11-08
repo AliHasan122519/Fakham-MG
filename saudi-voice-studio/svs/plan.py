@@ -62,7 +62,7 @@ def build(text: str, *, voice: str = "narrator_deep", dialect: str | None = None
     plan = {"version": 2, "id": plan_id, "voice": voice, "dialect": dialect, "style": style, "mode": mode,
             "genre": an["genre"], "genre_name": an["genre_name"], "controls": ctrl, "segments": segs,
             "analysis_method": an.get("method", "lexical"), "diacritics": diacritics,
-            "voice_style": v.get("style", "narration")}
+            "voice_style": v.get("style", "narration"), "lock_identity": v.get("reference_source") == "own"}
     return recompute(plan)
 
 
@@ -74,7 +74,7 @@ def recompute(plan: dict) -> dict:
         s["emotion"] = delivery.canon_emotion(s.get("emotion", "neutral"))
         s["intensity"] = delivery.clamp(float(s.get("intensity", 0.5)), 0.0, 1.0)
         s["params"] = delivery.compute(s, plan["controls"], plan.get("style", "narration"), index=i, total=n,
-                                       voice_style=plan.get("voice_style"))
+                                       voice_style=plan.get("voice_style"), lock_identity=bool(plan.get("lock_identity")))
     return plan
 
 
@@ -88,7 +88,9 @@ def validate(plan: dict) -> dict:
     if plan.get("dialect") not in voices.dialects():
         raise ValueError("لهجة غير معروفة.")
     out = {k: plan.get(k) for k in ("version", "id", "voice", "dialect", "style", "mode", "genre", "genre_name")}
-    out["voice_style"] = voices.get_voice(str(plan["voice"])).get("style", "narration")
+    _v = voices.get_voice(str(plan["voice"]))
+    out["voice_style"] = _v.get("style", "narration")
+    out["lock_identity"] = _v.get("reference_source") == "own"
     out["id"] = str(out.get("id") or uuid.uuid4().hex[:10])[:20]
     out["style"] = out["style"] if out["style"] in delivery.STYLES else "narration"
     out["mode"] = out["mode"] if out["mode"] in MODES else "auto"

@@ -381,6 +381,12 @@ def commit(voice_id: str, preview_id: str, transcript: str, emotion: str | None 
     dst = config.USER_REFS / f"{voice_id}{suffix}.wav"
     shutil.copyfile(src, dst)
     (config.USER_REFS / f"{voice_id}{suffix}.txt").write_text(transcript, encoding="utf-8")
+    if not emotion:                       # the first voice you add with your own reference becomes the default voice
+        try:
+            if not voices._DEFAULT_FILE.exists():
+                voices.set_default_voice(voice_id)
+        except Exception:
+            pass
     return dst
 
 

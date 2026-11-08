@@ -19,7 +19,7 @@ from urllib.parse import quote, urlparse
 
 from mcp.server.mcpserver import MCPServer
 
-from . import config, delivery, enhance, history, jobs, plan as planmod, pronounce, refaudio, render, studio, voices
+from . import auto, config, delivery, enhance, history, jobs, plan as planmod, pronounce, refaudio, render, studio, voices
 from .engine import ENGINE
 
 mcp = MCPServer(
@@ -53,7 +53,7 @@ def _job_view(job: dict) -> dict:
         tid = t["id"]
         out.update(take_id=tid, mp3_url=_link(tid, "mp3"), wav_url=_link(tid, "wav"), stream_url=_link(tid, "mp3", False),
                    before_mp3_url=_raw_link(tid), seconds=t["seconds"], took_seconds=t["took"], device=t["device"],
-                   voice=t["voice"], dialect=t["dialect"], style=t["style"], dialect_native=t["dialect_native"],
+                   voice=t["voice"], dialect=t["dialect"], style=t["style"], dialect_native=t["dialect_native"], voice_match=t.get("voice_match"),
                    dialect_note=t["dialect_note"], warnings=_warn(t["warnings"]), metrics=t["metrics"],
                    sentences=[{"id": x["id"], "text": x["text"], "emotion": x["emotion"], "intensity": x["intensity"],
                                "speed": x["params"]["speed_mul"], "pitch_st": x["params"]["pitch_st"],
@@ -98,13 +98,14 @@ def smart_enhance(text: str, voice: str = "narrator_deep", dialect: str = "", st
 
 
 @mcp.tool()
-def generate_voiceover(text: str = "", voice: str = "narrator_deep", dialect: str = "", emotion: str = "auto",
+def generate_voiceover(text: str = "", voice: str = "", dialect: str = "", emotion: str = "auto",
                        style: str = "", speed: float = 0.0, expressiveness: float = 1.0, tone_strength: float = 1.0,
                        pause: float = 1.0, formality: float = 0.5, plan_json: str = "", wait_seconds: int = 45) -> dict:
     """ولّد تعليقًا صوتيًا بأداء ذكي. emotion='auto' (اكتشاف تلقائي لكل جملة) أو مفتاح ثابت لكل الجمل:
     neutral|joy|sadness|excitement|calm|confidence|grandeur|empathy|suspense|warning|formal.
     style: narration|ad|news|documentary|story|conversation (فارغ = تلقائي). plan_json: خطة معدّلة من analyze_text.
-    يعيد روابط MP3/WAV + رابط النسخة «قبل التحسين» للمقارنة، وإلا job id لاستعلام get_job."""
+    voice فارغ = صوتك الافتراضي (المقطع الذي رفعتَه). مع emotion='auto' ودون plan_json يعمل المسار التلقائي الكامل
+    (تحليل المعنى + نطق + مشاعر + أداء + اختيار أقرب نسخة لصوتك). يعيد روابط MP3/WAV، وإلا job id لاستعلام get_job."""
     if jobs.running_count() >= jobs.MAX_RUNNING:
         return {"state": "error", "error": "توجد مهام توليد قيد التنفيذ؛ انتظر حتى تنتهي ثم أعد المحاولة."}
     plan = None
@@ -117,6 +118,10 @@ def generate_voiceover(text: str = "", voice: str = "narrator_deep", dialect: st
     elif not text:
         return {"state": "error", "error": "أعطِ text أو plan_json."}
     controls = {"expressiveness": expressiveness, "tone_strength": tone_strength, "pause": pause, "formality": formality}
+    voice = voice or voices.default_voice_id()
+    if plan is None and emotion in ("auto", "") and not speed and not style and not dialect:
+        jid = jobs.start(lambda progress=None, **kw: auto.run(progress=progress, **kw), text=text, voice=voice)
+        return _job_view(jobs.wait(jid, max(0, min(wait_seconds, 110))))
     jid = jobs.start(text=text, voice_id=voice, dialect=dialect or None, emotion=emotion, speed=speed or None,
                      plan=plan, style=style or None, controls=controls)
     return _job_view(jobs.wait(jid, max(0, min(wait_seconds, 110))))

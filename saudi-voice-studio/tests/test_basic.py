@@ -10,6 +10,7 @@ os.environ["SVS_TOKEN"] = "t"
 os.environ["SVS_VERIFY"] = "off"
 os.environ["SVS_ASR"] = "off"
 os.environ["SVS_SEMANTIC"] = "off"   # fast, offline unit tests (semantic checks live in test_semantic_slow.py)   # tests never load the speech recognizer
+os.environ["SVS_SPEAKER"] = "off"
 
 from svs import text_ar  # noqa: E402
 
