@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
-from . import config, history, jobs, studio, voices
+from . import config, delivery, history, jobs, plan as planmod, pronounce, render, studio, voices
 from .engine import ENGINE, EngineUnavailable
 
 app = FastAPI(title="Saudi Voice Studio", docs_url=None, redoc_url=None)
@@ -48,13 +48,41 @@ def auth(request: Request) -> None:
         raise HTTPException(401, "رمز الدخول غير صحيح (SVS_TOKEN).")
 
 
-class GenReq(BaseModel):
+class AnalyzeReq(BaseModel):
     text: str = Field(min_length=1, max_length=20000)
     voice: str = "narrator_deep"
     dialect: str | None = None
-    emotion: str = "neutral"
+    style: str | None = None
+    mode: str = "auto"
+    emotion: str | None = None
+    controls: dict | None = None
+
+
+class GenReq(BaseModel):
+    plan: dict | None = None            # an analysed/edited plan (preferred)
+    text: str | None = Field(default=None, max_length=20000)
+    voice: str = "narrator_deep"
+    dialect: str | None = None
+    emotion: str = "auto"
+    style: str | None = None
     speed: float | None = Field(default=None, ge=0.5, le=1.6)
-    format: str = "mp3"
+    controls: dict | None = None
+
+
+class RegenReq(BaseModel):
+    segment_id: str
+    new_seed: bool = True
+    edits: dict | None = None
+
+
+class PronReq(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+    dialect: str = "najdi"
+    light_dialect: bool = False
+
+
+class LexReq(BaseModel):
+    entries: list[dict] = Field(max_length=500)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -77,13 +105,71 @@ def api_voices():
     return {"voices": voices.list_voices(), "dialects": voices.dialects(), "emotions": voices.emotions()}
 
 
+@app.post("/api/analyze", dependencies=[Depends(auth)])
+def api_analyze(req: AnalyzeReq):
+    try:
+        return studio.analyze(req.text, voice=req.voice, dialect=req.dialect, style=req.style, mode=req.mode,
+                              controls=req.controls, emotion=req.emotion)
+    except (studio.StudioError, KeyError) as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/plan/recompute", dependencies=[Depends(auth)])
+def api_recompute(plan: dict):
+    try:
+        return planmod.validate(plan)
+    except (ValueError, KeyError) as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/pronounce", dependencies=[Depends(auth)])
+def api_pronounce(req: PronReq):
+    return pronounce.to_spoken(req.text, req.dialect, light_dialect=req.light_dialect)
+
+
+@app.get("/api/lexicon", dependencies=[Depends(auth)])
+def api_lexicon():
+    lx = pronounce.lexicon()
+    return {"user_entries": lx["user_entries"], "builtin_count": len(lx["entries"]) - len(lx["user_entries"])}
+
+
+@app.put("/api/lexicon", dependencies=[Depends(auth)])
+def api_lexicon_put(req: LexReq):
+    return {"saved": pronounce.save_user_entries(req.entries)}
+
+
+@app.get("/api/meta", dependencies=[Depends(auth)])
+def api_meta():
+    return {"emotions": {k: {"name_ar": v[0]} for k, v in delivery.EMOTIONS.items()},
+            "styles": {k: {"name_ar": v[0]} for k, v in delivery.STYLES.items()},
+            "controls": delivery.DEFAULT_CONTROLS, "limits": delivery.LIMITS,
+            "override_limits": delivery.OVERRIDE_LIMITS}
+
+
 @app.post("/api/generate", dependencies=[Depends(auth)])
 def api_generate(req: GenReq):
     if jobs.running_count() >= jobs.MAX_RUNNING:
         raise HTTPException(429, "توجد مهام توليد قيد التنفيذ؛ انتظر حتى تنتهي.")
-    jid = jobs.start(text=req.text, voice_id=req.voice, dialect=req.dialect, emotion=req.emotion,
-                     speed=req.speed, fmt=req.format)
+    if not req.plan and not req.text:
+        raise HTTPException(400, "أعطِ plan أو text.")
+    jid = jobs.start(text=req.text or "", voice_id=req.voice, dialect=req.dialect, emotion=req.emotion,
+                     speed=req.speed, plan=req.plan, style=req.style, controls=req.controls)
     return {"job": jid}
+
+
+def _regen(progress=None, **kw):
+    return render.regenerate(progress=progress, **kw)
+
+
+@app.post("/api/takes/{take_id}/regenerate", dependencies=[Depends(auth)])
+def api_regen(take_id: str, req: RegenReq):
+    if jobs.running_count() >= jobs.MAX_RUNNING:
+        raise HTTPException(429, "توجد مهام توليد قيد التنفيذ؛ انتظر حتى تنتهي.")
+    try:
+        render.load_take(take_id)
+    except render.RenderError as e:
+        raise HTTPException(404, str(e))
+    return {"job": jobs.start(_regen, take_id=take_id, segment_id=req.segment_id, edits=req.edits, new_seed=req.new_seed)}
 
 
 @app.get("/api/jobs/{jid}", dependencies=[Depends(auth)])
@@ -91,7 +177,23 @@ def api_job(jid: str):
     job = jobs.get(jid)
     if not job:
         raise HTTPException(404, "مهمة غير موجودة")
-    return job
+    view = {k: v for k, v in job.items() if k != "result"}
+    if job["state"] == "done":
+        view["take"] = studio.take_view(job["result"])
+    return view
+
+
+@app.get("/api/takes", dependencies=[Depends(auth)])
+def api_takes(limit: int = 30):
+    return {"items": render.list_takes(min(limit, 100))}
+
+
+@app.get("/api/takes/{take_id}", dependencies=[Depends(auth)])
+def api_take(take_id: str):
+    try:
+        return studio.take_view(render.load_take(take_id))
+    except render.RenderError as e:
+        raise HTTPException(404, str(e))
 
 
 @app.get("/api/history", dependencies=[Depends(auth)])
@@ -99,14 +201,22 @@ def api_history(limit: int = 20):
     return {"items": history.recent(min(limit, 100))}
 
 
-@app.get("/files/{gid}.{ext}", dependencies=[Depends(auth)])
-def files(gid: str, ext: str, download: int = 0):
+@app.get("/files/{take_id}/{name}", dependencies=[Depends(auth)])
+def files_take(take_id: str, name: str, download: int = 0):
     try:
-        p = studio.output_path(gid, ext)
-    except studio.StudioError as e:
+        p = render.take_file(take_id, name)
+    except render.RenderError as e:
         raise HTTPException(404, str(e))
-    return FileResponse(p, media_type="audio/mpeg" if ext == "mp3" else "audio/wav",
-                        filename=f"saudi-voice-{gid}.{ext}" if download else None)
+    return FileResponse(p, media_type="audio/mpeg" if name.endswith(".mp3") else "audio/wav",
+                        filename=f"saudi-voice-{take_id}-{name}" if download else None)
+
+
+@app.get("/files/{take_id}.{ext}", dependencies=[Depends(auth)])
+def files_legacy(take_id: str, ext: str, download: int = 0):
+    """Stable short link used by MCP: /files/<take>.mp3 → mastered output."""
+    if ext not in ("mp3", "wav"):
+        raise HTTPException(404, "غير موجود")
+    return files_take(take_id, f"master.{ext}", download)
 
 
 @app.post("/api/voices", dependencies=[Depends(auth)])
@@ -128,13 +238,13 @@ def api_create_voice(voice_id: str = Form(...), name_ar: str = Form(...), gender
 
 
 @app.post("/api/voices/{voice_id}/reference", dependencies=[Depends(auth)])
-def api_set_ref(voice_id: str, ref_text: str = Form(...), ref: UploadFile = File(...)):
+def api_set_ref(voice_id: str, ref_text: str = Form(...), ref: UploadFile = File(...), emotion: str = Form("")):
     try:
         voices.get_voice(voice_id)
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td) / "ref_in"
             _save_upload(ref, tmp)
-            voices.save_reference(voice_id, tmp, ref_text)
+            voices.save_reference(voice_id, tmp, ref_text, emotion=emotion or None)
         return {"ok": True}
     except (ValueError, KeyError) as e:
         raise HTTPException(400, str(e))

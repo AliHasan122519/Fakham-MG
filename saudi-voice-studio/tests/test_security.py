@@ -128,3 +128,29 @@ def test_notebook_matplotlib_backend_is_forced_headless():
 def test_cell_overrides_inherited_backend():
     cell = (Path(__file__).resolve().parent.parent / "colab" / "run_studio.py").read_text(encoding="utf-8")
     assert 'env["MPLBACKEND"] = "Agg"' in cell
+
+
+def test_v2_endpoints_require_token_and_validate():
+    from fastapi.testclient import TestClient
+    from svs import web
+    c = TestClient(web.app)
+    for method, url in [("post", "/api/analyze"), ("post", "/api/plan/recompute"), ("post", "/api/pronounce"),
+                        ("get", "/api/lexicon"), ("put", "/api/lexicon"), ("get", "/api/takes"), ("get", "/api/meta"),
+                        ("get", "/files/abcdefabcdef/master.mp3"), ("post", "/api/takes/abcdefabcdef/regenerate")]:
+        assert getattr(c, method)(url).status_code == 401, url
+    h = {"x-svs-token": "t"}
+    assert c.post("/api/analyze", headers=h, json={"text": "احذر! خطر."}).status_code == 200
+    assert c.post("/api/analyze", headers=h, json={"text": "x" * 25000}).status_code == 422
+    assert c.post("/api/plan/recompute", headers=h, json={"segments": []}).status_code == 400
+    assert c.put("/api/lexicon", headers=h, json={"entries": [{"word": "a", "say": "b"}] * 501}).status_code == 422
+    assert c.get("/files/..%2f..%2fetc/passwd.mp3", headers=h).status_code in (400, 404)
+    assert c.get("/files/abcdefabcdef/..%2fmaster.mp3", headers=h).status_code in (400, 404)
+    assert c.get("/files/abcdefabcdef/take.json", headers=h).status_code == 404       # only audio names are served
+
+
+def test_lexicon_entries_are_capped_and_cannot_inject_regex():
+    from svs import pronounce
+    n = pronounce.save_user_entries([{"word": "(a+)+$", "say": "x"}, {"word": "w" * 100, "say": "y"}, {"word": "ok", "say": "s" * 500}])
+    assert n == 1
+    pronounce.to_spoken("aaaaaaaaaaaaaaaaaaaaaaaa!")          # metacharacters in a word are escaped, so no ReDoS
+    pronounce.save_user_entries([])

@@ -18,7 +18,9 @@ def running_count() -> int:
     return sum(1 for j in JOBS.values() if j["state"] == "running")
 
 
-def start(**kwargs) -> str:
+def start(fn=None, **kwargs) -> str:
+    """Run `fn(progress=..., **kwargs)` (default: studio.generate) in a background thread; poll with get()."""
+    fn = fn or studio.generate
     with _LOCK:
         if len(JOBS) >= MAX_KEPT:
             for k in [k for k, j in JOBS.items() if j["state"] != "running"][: MAX_KEPT // 2]:
@@ -29,7 +31,7 @@ def start(**kwargs) -> str:
     def run():
         job = JOBS[jid]
         try:
-            res = studio.generate(progress=lambda p, m: job.update(progress=round(p, 2), message=m), **kwargs)
+            res = fn(progress=lambda p, m: job.update(progress=round(p, 2), message=m), **kwargs)
             job.update(state="done", result=res, progress=1.0, message="تم")
         except (studio.StudioError, EngineUnavailable, KeyError, ValueError) as e:
             job.update(state="error", error=str(e))

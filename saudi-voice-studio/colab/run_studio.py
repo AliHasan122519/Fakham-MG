@@ -4,6 +4,8 @@
 DOWNLOAD_SAUDI_MODEL = True  #@param {type:"boolean"}
 USE_GOOGLE_DRIVE = True  #@param {type:"boolean"}
 #@markdown ⚠️ ربط Drive يمنح بيئة التشغيل وصولًا لكل ملفات Drive لديك (Colab لا يسمح بربط مجلد واحد فقط). الكود يكتب داخل `saudi-voice-studio/` فقط، لكن إن كنت لا تريد هذا الوصول أزل العلامة (ستُعاد تنزيلات النماذج ~2.6GB كل جلسة ولا تُحفظ الشخصيات).
+ENABLE_EXPRESSIVE_ENGINE = False  #@param {type:"boolean"}
+#@markdown (اختياري — تجريبي: محرك Chatterbox المفتوح MIT بمفتاح تعبير حقيقي للفصحى فقط. يضيف بيئة منفصلة ~5GB + أوزان 3.3GB ووقت تثبيت أطول. اتركه معطّلًا في أول تشغيل.)
 ALLOW_UNVERIFIED_CLOUDFLARED = False  #@param {type:"boolean"}
 #@markdown (اتركه معطّلًا: لا يُشغَّل cloudflared إلا إذا طابقت بصمته SHA-256 المثبّتة.)
 #@markdown (النموذج الثاني للهجات الحجازية/البيضاء/الخليجية، ~1.3GB إضافية على Drive. النجدية لا تحتاجه.)
@@ -20,6 +22,11 @@ CF_SHA256 = "1f99fb518b83dec2ba8d870a7cc991d82a77e6196295a3d2754ba17ab9f91872"
 UV_PIN = "uv==0.13.7"
 PINS = ["torch==2.8.0", "torchaudio==2.8.0", "habibi-tts==0.1.1", "mcp==2.3.0", "fastapi==0.162.2",
         "uvicorn==0.54.0", "python-multipart==0.0.33", "soundfile==0.14.0", "huggingface_hub==1.33.0"]
+EXP_PINS = ["torch==2.6.0", "torchaudio==2.6.0", "numpy>=2.0.0", "librosa==0.11.0", "s3tokenizer==0.3.0", "transformers==5.2.0",
+            "diffusers==0.29.0", "resemble-perth==1.0.1", "conformer==0.3.2", "safetensors==0.5.3", "spacy-pkuseg==1.0.2",
+            "pykakasi==2.3.0", "pyloudnorm==0.2.0", "omegaconf==2.4.0", "huggingface_hub==1.33.0", "soundfile==0.14.0",
+            "setuptools<81"]
+EXP_VENV = Path(os.environ.get("SVS_EXP_VENV_DIR", "/content/svs-exp-venv"))
 IN_COLAB = "google.colab" in sys.modules
 APP = Path(os.environ.get("SVS_APP_DIR", "/content/saudi-voice-studio"))
 VENV = Path(os.environ.get("SVS_VENV_DIR", "/content/svs-venv"))
@@ -136,12 +143,25 @@ def main():
     else:
         say("   ✔ البيئة جاهزة من تشغيل سابق في هذه الجلسة.")
 
+    if ENABLE_EXPRESSIVE_ENGINE:
+        step(3, "تجهيز المحرك التعبيري الاختياري (بيئة منفصلة)…")
+        estamp = EXP_VENV / (".ok-" + hashlib.sha256("|".join(EXP_PINS).encode()).hexdigest()[:12])
+        if not ((EXP_VENV / "bin" / "python").exists() and estamp.exists()):
+            uv = [sys.executable, "-m", "uv"]
+            run(uv + ["venv", "--python", sys.executable, "--clear", str(EXP_VENV)], "إنشاء بيئة المحرك التعبيري", env=env)
+            run(uv + ["pip", "install", "--python", str(EXP_VENV / "bin" / "python")] + EXP_PINS, "تثبيت مكتبات المحرك التعبيري", env=env)
+            run(uv + ["pip", "install", "--python", str(EXP_VENV / "bin" / "python"), "--no-deps", "chatterbox-tts==0.1.7"],
+                "تثبيت chatterbox-tts", env=env)
+            estamp.write_text("ok")
+        env["SVS_EXPRESSIVE_PY"] = str(EXP_VENV / "bin" / "python")
+        env["SVS_EXPRESSIVE_MODELS"] = str(home / "models" / "chatterbox")
+
     # 4) الجهاز + النماذج
     step(4, "فحص GPU وتنزيل النماذج…")
     probe = subprocess.run([str(VPY), "-c", "import torch;print(('GPU — '+torch.cuda.get_device_name(0)) if torch.cuda.is_available() else 'CPU')"],
                            capture_output=True, text=True, env=env).stdout.strip()
     say("   الجهاز: " + (probe if probe.startswith("GPU") else "CPU فقط (بطيء ~10× مدة الصوت). لتجربة GPU: Runtime ← Change runtime type ← T4 GPU ثم أعد التشغيل."))
-    which = ["najdi"] + (["saudi"] if DOWNLOAD_SAUDI_MODEL else [])
+    which = ["najdi"] + (["saudi"] if DOWNLOAD_SAUDI_MODEL else []) + (["expressive"] if ENABLE_EXPRESSIVE_ENGINE else [])
     run([str(VPY), str(APP / "scripts/download_models.py"), *which], "تنزيل النماذج من Hugging Face (قد يستغرق دقائق)", env=env, cwd=APP)
 
     # 5) رابط HTTPS مجاني (Cloudflare Quick Tunnel — بلا حساب)

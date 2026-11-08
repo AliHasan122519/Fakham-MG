@@ -44,6 +44,12 @@ class Engine:
             info["threads"] = torch.get_num_threads()
         except Exception as e:  # torch missing
             info["error"] = f"torch غير مثبت: {e}"
+        try:
+            from . import expressive
+            info["expressive_engine"] = {"enabled": expressive.available(), "license": "MIT (Chatterbox)",
+                                         "note": "فصحى فقط؛ مفتاح تعبير حقيقي؛ اختياري"}
+        except Exception:
+            info["expressive_engine"] = {"enabled": False}
         from .audio import have_ffmpeg
         info["ffmpeg"] = have_ffmpeg()
         for key, spec in config.ENGINES.items():

@@ -3,7 +3,7 @@ import base64, io, json, tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-INCLUDE = ["svs", "voices/presets.json", "voices/refs/.gitkeep", "web/index.html", "scripts/download_models.py", "requirements.txt"]
+INCLUDE = ["svs", "voices/presets.json", "voices/lexicon_default.json", "voices/refs/.gitkeep", "web/index.html", "scripts/download_models.py", "requirements.txt"]
 
 
 def payload() -> str:

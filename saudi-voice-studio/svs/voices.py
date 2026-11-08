@@ -23,7 +23,15 @@ def _presets() -> dict:
 
 
 def dialects() -> dict:
-    return _presets()["dialects"]
+    d = _presets()["dialects"]
+    try:
+        from . import expressive
+        ok = expressive.available()
+    except Exception:
+        ok = False
+    for k, v in d.items():
+        v["available"] = True if v.get("engine") != "expressive" else ok
+    return d
 
 
 def emotions() -> dict:
@@ -59,15 +67,16 @@ def _ref_text(v: dict) -> str | None:
 DEMO_REFS = {
     "najdi": ("Najdi.wav", "تكفى طمني انا اليوم ماني بنايم ولا هو بداخل عيني النوم الين اتطمن عليه."),
     "hijazi": ("Hijazi.wav", "ابغاك تحقق معاه بس بشكل ودي لانه سلطان يمر بظروف صعبة شوية."),
-    "khaleeji": ("Gulf.wav", "وين تو الناس متى تصحى ومتى تفطر وتغير يبيلك ساعة يعني بالله تروح الشغل الساعة عشره."),
-    "white": ("Najdi.wav", "تكفى طمني انا اليوم ماني بنايم ولا هو بداخل عيني النوم الين اتطمن عليه."),
+    "gulf": ("Gulf.wav", "وين تو الناس متى تصحى ومتى تفطر وتغير يبيلك ساعة يعني بالله تروح الشغل الساعة عشره."),
 }
+DEMO_REFS["khaleeji"] = DEMO_REFS["gulf"]
+DEMO_REFS["white"] = DEMO_REFS["najdi"]
 
 
-def demo_reference(dialect: str) -> tuple[Path, str] | None:
+def demo_reference(key: str) -> tuple[Path, str] | None:
     try:
         from importlib.resources import files
-        name, text = DEMO_REFS.get(dialect, DEMO_REFS["najdi"])
+        name, text = DEMO_REFS.get(key, DEMO_REFS["najdi"])
         p = Path(str(files("habibi_tts").joinpath(f"assets/{name}")))
         return (p, text) if p.is_file() else None
     except Exception:
@@ -86,9 +95,10 @@ def list_voices() -> list[dict]:
     for v in voices.values():
         ref = _resolve_ref(v)
         v["has_reference"] = bool(ref and _ref_text(v))
-        v["reference_source"] = "own" if v["has_reference"] else ("demo" if demo_reference(v.get("default_dialect", "najdi")) else "none")
+        v["reference_source"] = "own" if v["has_reference"] else ("demo" if demo_reference(v.get("ref_id") or v.get("default_dialect", "najdi")) else "none")
         v["ready"] = v["reference_source"] != "none"
         v.pop("ref_audio", None)
+        v["emotion_refs"] = sorted(f.name.split(".")[1] for f in config.USER_REFS.glob(f"{v['id']}.*.wav"))
         out.append(v)
     return out
 
@@ -106,26 +116,40 @@ def get_voice(voice_id: str) -> dict:
     raise KeyError(f"صوت غير موجود: {voice_id}")
 
 
-def reference_for(v: dict, dialect: str) -> tuple[Path, str, str]:
-    """(path, transcript, source) — own reference if present, else the dialect demo clip."""
+def reference_for(v: dict, dialect: str, emotion: str | None = None) -> tuple[Path, str, str]:
+    """(path, transcript, source). Order: your emotion-specific clip > your base clip > persona demo clip.
+    An emotion-specific clip is the ONLY way to get a truly different emotional timbre from this model family."""
+    vid = v["id"]
+    if emotion and emotion != "neutral":
+        wav, txt = config.USER_REFS / f"{vid}.{emotion}.wav", config.USER_REFS / f"{vid}.{emotion}.txt"
+        if wav.is_file() and txt.is_file():
+            return wav, txt.read_text(encoding="utf-8").strip(), "own-emotion"
     if v.get("_ref_path") and v.get("_ref_text"):
         return v["_ref_path"], v["_ref_text"], "own"
-    d = demo_reference(dialect)
+    d = demo_reference(v.get("ref_id") or dialect)
     if d:
         return d[0], d[1], "demo"
     raise KeyError("no reference")
 
 
-def save_reference(voice_id: str, src_audio: Path, transcript: str) -> Path:
-    """Attach an authorised reference clip (5-10 s) + its exact transcript to a voice."""
+def emotion_refs(voice_id: str) -> list[str]:
     check_id(voice_id)
+    return sorted(p.name.split(".")[1] for p in config.USER_REFS.glob(f"{voice_id}.*.wav"))
+
+
+def save_reference(voice_id: str, src_audio: Path, transcript: str, emotion: str | None = None) -> Path:
+    """Attach an authorised reference clip (5-10 s) + its exact transcript to a voice (optionally for one emotion)."""
+    check_id(voice_id)
+    if emotion is not None and not re.match(r"^[a-z]{3,12}$", emotion):
+        raise ValueError("اسم العاطفة غير صالح.")
+    suffix = f".{emotion}" if emotion else ""
     if not transcript.strip():
         raise ValueError("النص المنطوق في المقطع المرجعي (ref_text) مطلوب وبدقة.")
     if len(transcript) > 1000:
         raise ValueError("النص المرجعي طويل جدًا (الحد 1000 حرف).")
-    dst = config.USER_REFS / f"{voice_id}.wav"
+    dst = config.USER_REFS / f"{voice_id}{suffix}.wav"
     audio.prepare_reference(Path(src_audio), dst)
-    (config.USER_REFS / f"{voice_id}.txt").write_text(transcript.strip(), encoding="utf-8")
+    (config.USER_REFS / f"{voice_id}{suffix}.txt").write_text(transcript.strip(), encoding="utf-8")
     return dst
 
 
@@ -158,3 +182,5 @@ def delete_voice(voice_id: str) -> None:
     p.unlink()
     for ext in ("wav", "txt"):
         (config.USER_REFS / f"{voice_id}.{ext}").unlink(missing_ok=True)
+        for f in config.USER_REFS.glob(f"{voice_id}.*.{ext}"):      # emotion-specific clips
+            f.unlink(missing_ok=True)

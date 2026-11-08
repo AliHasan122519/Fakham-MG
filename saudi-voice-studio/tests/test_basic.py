@@ -33,8 +33,8 @@ def test_voices_and_dialects():
     from svs import voices
     ids = {v["id"] for v in voices.list_voices()}
     assert {"narrator_deep", "promo_energetic", "anchor_formal", "narrator_female", "documentary_cinematic"} <= ids
-    assert {"najdi", "hijazi", "white", "khaleeji"} == set(voices.dialects())
-    assert {"neutral", "enthusiastic", "sad", "dramatic"} <= set(voices.emotions())
+    assert {"najdi", "hijazi", "white", "khaleeji", "msa"} == set(voices.dialects())
+    assert {"neutral", "joy", "sadness", "excitement", "calm", "confidence", "grandeur", "empathy", "suspense", "warning", "formal"} <= set(voices.emotions())
 
 
 def test_create_delete_voice():
