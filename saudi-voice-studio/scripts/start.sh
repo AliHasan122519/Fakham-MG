@@ -5,6 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 PY=.venv/bin/python; [ -x "$PY" ] || PY=python3
 export SVS_PORT="${SVS_PORT:-8765}"
+export MPLBACKEND=Agg   # headless server (a notebook-style MPLBACKEND would crash matplotlib)
 if [ -z "${SVS_TOKEN:-}" ]; then
   [ -f .svs_token ] || $PY -c "import secrets;print(secrets.token_urlsafe(24))" > .svs_token
   export SVS_TOKEN="$(cat .svs_token)"

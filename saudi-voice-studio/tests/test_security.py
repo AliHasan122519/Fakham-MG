@@ -110,3 +110,21 @@ def test_job_cap():
         jobs.JOBS[f"r{i}"] = {"state": "running"}
     assert jobs.running_count() >= jobs.MAX_RUNNING
     jobs.JOBS.clear()
+
+
+def test_notebook_matplotlib_backend_is_forced_headless():
+    """Regression: Colab exports MPLBACKEND=module://matplotlib_inline.backend_inline, invalid in our isolated venv."""
+    import subprocess
+    bad = {**os.environ, "MPLBACKEND": "module://matplotlib_inline.backend_inline"}
+    r = subprocess.run([sys.executable, "-c",
+                        "import sys; sys.path.insert(0, %r); import svs, os; print(os.environ['MPLBACKEND']);"
+                        "\ntry:\n import matplotlib.pyplot as p, matplotlib; print(matplotlib.get_backend())\nexcept ImportError: print('agg')"
+                        % str(Path(__file__).resolve().parent.parent)],
+                       env=bad, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.split()[0] == "Agg" and r.stdout.split()[-1].lower() == "agg"
+
+
+def test_cell_overrides_inherited_backend():
+    cell = (Path(__file__).resolve().parent.parent / "colab" / "run_studio.py").read_text(encoding="utf-8")
+    assert 'env["MPLBACKEND"] = "Agg"' in cell

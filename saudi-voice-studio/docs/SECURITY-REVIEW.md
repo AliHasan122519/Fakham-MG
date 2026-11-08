@@ -30,3 +30,7 @@
 5. **Cloudflare Quick Tunnel** يمرّ عبر Cloudflare (يرى حركة المرور). لا ضمان اتاحة.
 6. **إقرار حق الصوت** (`i_confirm_rights`) يعتمد على صدق المستخدم.
 7. لم تُختبر داخل Colab الحقيقي: Drive، النفق، pip هناك.
+
+
+## ملحق: MPLBACKEND (2026-11-08)
+Colab يصدّر `MPLBACKEND=module://matplotlib_inline.backend_inline`. الدفتر كان يمرّره للبيئة المعزولة (لا تحوي matplotlib_inline) فينهار التوليد. الإصلاح يفرض `Agg` في ثلاث طبقات: بيئة العمليات الفرعية في الدفتر، و`svs/__init__.py` قبل أي استيراد، و`engine.py` قبل استيراد f5-tts. لا يمسّ إعدادات Colab العامة.

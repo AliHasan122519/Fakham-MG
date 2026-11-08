@@ -118,6 +118,9 @@ def main():
     env = {k: v for k, v in os.environ.items() if not secretish.search(k)}
     env.update({"SVS_HOME": str(home), "SVS_TOKEN": token, "SVS_HOST": "127.0.0.1", "SVS_PORT": str(PORT),
                 "PYTHONUNBUFFERED": "1", "UV_NO_PROGRESS": "1", "HF_HUB_DISABLE_TELEMETRY": "1"})
+    # Colab يصدّر MPLBACKEND=module://matplotlib_inline.backend_inline (غير صالح في البيئة المعزولة ولا يوجد فيها
+    # matplotlib_inline) فينهار توليد الصوت. نفرض backend بلا واجهة لكل العمليات الفرعية، ونتجاوز قيمة Colab.
+    env["MPLBACKEND"] = "Agg"
 
     # 3) بيئة بايثون معزولة + المكتبات
     step(3, "تجهيز بيئة بايثون معزولة (أول مرة 3–8 دقائق؛ سترى التقدّم)…")

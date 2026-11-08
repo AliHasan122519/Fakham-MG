@@ -5,6 +5,7 @@ Weights are downloaded on first use from Hugging Face (free, public, no token).
 """
 from __future__ import annotations
 
+import os
 import threading
 import time
 from pathlib import Path
@@ -67,6 +68,12 @@ class Engine:
     def _load(self, key: str):
         if key in self._models:
             return self._models[key]
+        os.environ["MPLBACKEND"] = "Agg"
+        try:
+            import matplotlib
+            matplotlib.use("Agg", force=True)
+        except Exception:
+            pass  # matplotlib missing is fine; f5-tts will report it if it really needs it
         try:
             import torch
             from f5_tts.infer.utils_infer import load_model, load_vocoder
