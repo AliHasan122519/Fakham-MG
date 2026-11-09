@@ -1,0 +1,4 @@
+skip cmp_bf16_cap8 (done)
+skip cmp_fp32 (done)
+skip cmp_bf16_uncapped (done)
+12:46:42 START session
