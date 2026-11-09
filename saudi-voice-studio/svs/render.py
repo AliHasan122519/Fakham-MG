@@ -538,9 +538,9 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
     add("noise", "الضوضاء والوشوشة", "ok" if (nfv is None or nfv <= -50) else "warn",
         (f"ضجيج الوقفات {round(nfv, 1)} dBFS (الحد −50)" if nfv is not None else "لا توجد وقفات منخفضة تُقاس (الأرضية رقمية/نظيفة)") + cl_note,
         cleanup=clean_rep)
-    rtv = qc.reverb_tail_db(mw)
+    rtv = qc.reverb_tail_db(mw, min_offsets=3)        # a median of fewer than 3 speech offsets (e.g. one short sentence) is not a reliable verdict
     add("reverb", "الصدى والارتداد", "ok" if (rtv is None or rtv <= -26 or C.get("reverb", 0) > 0) else "warn",
-        f"ذيل ما بعد الكلام {round(rtv, 1) if rtv is not None else '—'} dB (الجاف ≲ −26)"
+        (f"ذيل ما بعد الكلام {round(rtv, 1)} dB (الجاف ≲ −26)" if rtv is not None else "لا توجد 3 نهايات كلام على الأقل لقياس موثوق للصدى (نص قصير) — لم يُحكم")
         + ("" if C.get("reverb", 0) == 0 else " · أُضيف صدى بطلبك") + (cl_note if "الصدى" in cl_note else ""))
     rms_resid = [audio.active_rms_db(c) - float(s["params"]["gain_db"]) for c, s in zip(proc_clips, segs)]
     sd = float(np.std(rms_resid)) if len(rms_resid) > 1 else 0.0

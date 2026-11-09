@@ -44,7 +44,7 @@ def chars_per_second(wave: np.ndarray, text: str) -> float | None:
     return (n / d) if (n >= 10 and d > 0.5) else None
 
 
-def reverb_tail_db(x: np.ndarray) -> float | None:
+def reverb_tail_db(x: np.ndarray, min_offsets: int = 1) -> float | None:
     """Median level of 80-250 ms after sharp speech offsets relative to the speech just before them (dB).
     A dry studio take falls to the noise floor (≲ -30); a reverberant room keeps a decaying tail (≳ -18).
     None if no clean offset (sharp drop followed by a pause, not by more speech) is found."""
@@ -64,7 +64,7 @@ def reverb_tail_db(x: np.ndarray) -> float | None:
                 i += 30
                 continue
         i += 1
-    return float(np.median(vals)) if vals else None
+    return float(np.median(vals)) if len(vals) >= max(1, min_offsets) else None
 
 
 def noise_floor_db(x: np.ndarray) -> float | None:
