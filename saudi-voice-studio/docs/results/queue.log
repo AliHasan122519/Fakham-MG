@@ -2,3 +2,5 @@ skip cmp_bf16_cap8 (done)
 skip cmp_fp32 (done)
 skip cmp_bf16_uncapped (done)
 12:46:42 START session
+13:32:07 END session ok
+QUEUE_DONE 13:32:07
