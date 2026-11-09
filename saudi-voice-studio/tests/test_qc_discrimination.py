@@ -95,3 +95,16 @@ def test_pitch_assessment_is_statistically_sound():
     d = qc.f0_assess([6.0, 9.0, 12.0, 7.0, 11.0, 8.0], baseline_f0=8.5)       # genuinely unstable narrator
     assert d["mode"] == "spread" and not d["ok"]
     assert qc.f0_assess([], None)["mode"] == "insufficient"
+
+
+def test_inaudible_snr_change_on_a_pristine_take_is_not_a_defect():
+    """A >3 dB SNR drop is flagged only when the result is audible (< 50 dB): 56 -> 52.5 dB passes, 42 -> 36 dB is flagged."""
+    t = np.arange(24000 * 6) / 24000
+    env = (np.sin(2 * np.pi * 0.7 * t) > 0).astype(np.float32)
+    voice = (0.3 * sum(np.sin(2 * np.pi * 140 * h * t) / h for h in range(1, 6)) * env).astype(np.float32)
+    noisy = lambda sd: voice + (np.random.default_rng(3).standard_normal(len(t)) * sd).astype(np.float32)
+    snr_reasons = lambda r: [x for x in r["reasons"] if "الضجيج" in x]
+    r_ok = qc.transparency(noisy(0.0004), noisy(0.0006))
+    assert r_ok["snr_before"] - r_ok["snr_after"] > 3.0 and not snr_reasons(r_ok)
+    r_bad = qc.transparency(noisy(0.002), noisy(0.004))
+    assert r_bad["snr_after"] < 50 and snr_reasons(r_bad)

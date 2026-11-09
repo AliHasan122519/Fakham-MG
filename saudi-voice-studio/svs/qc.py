@@ -205,7 +205,9 @@ def transparency(pre: np.ndarray, post: np.ndarray, *, ref: np.ndarray | None = 
     s0, s1 = snr(pre), snr(post)
     if s0 is not None and s1 is not None:
         info.update(snr_before=round(s0, 1), snr_after=round(s1, 1))
-        if s0 - s1 > 3.0:
+        # flagged only when the rise is real (>3 dB) AND the result is audible (SNR below 50 dB — broadcast-grade is ~50+).
+        # A 58 -> 54 dB change on an already pristine take (a compressor's normal effect) is not a defect.
+        if s0 - s1 > 3.0 and s1 < 50.0:
             reasons.append(f"زاد الضجيج نسبةً للكلام ({s0:.0f} ← {s1:.0f} dB)")
     r0, r1 = reverb_tail_db(pre), reverb_tail_db(post)
     if r0 is not None and r1 is not None and r1 - r0 > 6.0:
