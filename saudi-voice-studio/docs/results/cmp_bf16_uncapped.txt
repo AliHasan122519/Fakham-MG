@@ -1,0 +1,7 @@
+{"i": 0, "chars": 30, "audio_s": 2.56, "synth_s": 33.6, "rtf": 13.13, "ram_before": 0.103, "ram_after": 2.93, "ram_released": 2.361, "asr": 0.966, "spk": 0.646, "f0_st": 10.15}
+{"i": 1, "chars": 70, "audio_s": 6.08, "synth_s": 43.5, "rtf": 7.15, "ram_before": 3.207, "ram_after": 3.643, "ram_released": 2.821, "asr": 0.971, "spk": 0.72, "f0_st": 4.98}
+{"i": 2, "chars": 5, "audio_s": 1.41, "synth_s": 25.0, "rtf": 17.76, "ram_before": 3.129, "ram_after": 3.662, "ram_released": 2.829, "asr": 0.75, "spk": 0.393, "f0_st": null}
+{"i": 3, "chars": 37, "audio_s": 3.26, "synth_s": 29.2, "rtf": 8.96, "ram_before": 3.123, "ram_after": 3.675, "ram_released": 2.84, "asr": 1.0, "spk": 0.649, "f0_st": 7.46}
+{"i": 4, "chars": 65, "audio_s": 5.65, "synth_s": 34.4, "rtf": 6.09, "ram_before": 3.157, "ram_after": 3.734, "ram_released": 2.847, "asr": 0.976, "spk": 0.774, "f0_st": 8.93}
+{"i": 5, "chars": 33, "audio_s": 2.84, "synth_s": 25.7, "rtf": 9.04, "ram_before": 3.199, "ram_after": 3.711, "ram_released": 2.853, "asr": 0.968, "spk": 0.644, "f0_st": 12.0}
+SUMMARY bf16_uncapped {"rtf_mean": 10.36, "asr_mean": 0.939, "spk_mean": 0.638, "ram_start": 0.103, "ram_end_released": 2.853, "ram_peak": 3.734}
