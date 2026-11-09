@@ -180,7 +180,7 @@ def main():
     step(4, "فحص GPU وتنزيل النماذج…")
     probe = subprocess.run([str(VPY), "-c", "import torch;print(('GPU — '+torch.cuda.get_device_name(0)) if torch.cuda.is_available() else 'CPU')"],
                            capture_output=True, text=True, env=env).stdout.strip()
-    say("   الجهاز: " + (probe if probe.startswith("GPU") else "CPU فقط (بطيء ~10× مدة الصوت). لتجربة GPU: Runtime ← Change runtime type ← T4 GPU ثم أعد التشغيل."))
+    say("   الجهاز: " + (probe if probe.startswith("GPU") else "CPU فقط (≈5–7× مدة الصوت للتركيب؛ أسرع بكثير مع GPU). لتجربة GPU: Runtime ← Change runtime type ← T4 GPU ثم أعد التشغيل."))
     which = (["najdi"] + (["saudi"] if DOWNLOAD_SAUDI_MODEL else []) + (["semantic", "whisper", "speaker"] if ENABLE_SMART_ENHANCEMENT else [])
              + (["expressive"] if ENABLE_EXPRESSIVE_ENGINE else []))
     run([str(VPY), str(APP / "scripts/download_models.py"), *which], "تنزيل النماذج من Hugging Face (قد يستغرق دقائق)", env=env, cwd=APP)

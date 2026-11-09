@@ -114,3 +114,17 @@ def test_memory_hygiene_is_safe_and_applies_on_linux():
     memory.release()                                   # must never raise
     if __import__("sys").platform.startswith("linux"):
         assert memory.tune() is True                   # glibc: arena cap accepted
+
+
+def test_notebook_payload_is_current_with_the_working_tree():
+    """The Colab notebook embeds the code. A stale payload once shipped WITHOUT the memory fix; every embedded file must equal the repo file."""
+    import base64, io, json, re, tarfile
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    nb = json.loads((root / "colab" / "saudi_voice_studio.ipynb").read_text(encoding="utf-8"))
+    src = "".join("".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "code")
+    payload = re.search(r'PAYLOAD\s*=\s*"([A-Za-z0-9+/=]+)"', src).group(1)
+    t = tarfile.open(fileobj=io.BytesIO(base64.b64decode(payload)), mode="r:gz")
+    stale = [n for n in t.getnames() if t.getmember(n).isfile() and (root / n).exists() and t.extractfile(n).read() != (root / n).read_bytes()]
+    assert not stale, f"rebuild the notebook (python colab/build_nb.py): {stale}"
+    assert "svs/memory.py" in t.getnames()
