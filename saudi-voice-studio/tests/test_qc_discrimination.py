@@ -86,12 +86,12 @@ def test_chain_intent_parses_equalizers_and_shelves():
 
 
 def test_pitch_assessment_is_statistically_sound():
-    a = qc.f0_assess([9.0, 9.4, 8.7], ref_f0=8.5)                       # 3 sentences: no spread estimate, anchor on the reference
+    a = qc.f0_assess([9.0, 9.4, 8.7], baseline_f0=8.5)                  # 3 sentences: no spread estimate, anchor on the learned baseline
     assert a["mode"] == "anchor" and a["ok"]
-    b = qc.f0_assess([9.0, 12.9, 8.7], ref_f0=8.5)
+    b = qc.f0_assess([9.0, 12.9, 8.7], baseline_f0=8.5)
     assert b["mode"] == "anchor" and not b["ok"] and b["outlier_idx"] == [1]
-    c = qc.f0_assess([9.0, 9.3, 8.8, 9.1, 12.4, 8.9, 9.2], ref_f0=8.5)  # n>=5: one outlier must not inflate the robust spread
+    c = qc.f0_assess([9.0, 9.3, 8.8, 9.1, 12.4, 8.9, 9.2], baseline_f0=8.5)  # n>=5: one outlier must not inflate the robust spread
     assert c["mode"] == "spread" and c["ok"] and c["outlier_idx"] == [4]
-    d = qc.f0_assess([6.0, 9.0, 12.0, 7.0, 11.0, 8.0], ref_f0=8.5)       # genuinely unstable narrator
+    d = qc.f0_assess([6.0, 9.0, 12.0, 7.0, 11.0, 8.0], baseline_f0=8.5)       # genuinely unstable narrator
     assert d["mode"] == "spread" and not d["ok"]
     assert qc.f0_assess([], None)["mode"] == "insufficient"

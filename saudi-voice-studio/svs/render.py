@@ -124,25 +124,39 @@ def _f0_median_st(w: np.ndarray) -> float | None:
     return float(np.median(12 * np.log2(f0 / 100.0))) if len(f0) >= 25 else None
 
 
-_REF_F0: dict = {}
+_F0_BASE_FILE = config.DATA / "f0_baseline.json"
 
 
-def _ref_f0(path) -> float | None:
-    """Median pitch (semitones re 100 Hz) of the reference clip, cached per file version."""
+def _f0_baseline(ref_path) -> float | None:
+    """Typical narration pitch (semitones re 100 Hz) of THIS voice/reference, learned from previous takes; None until >= 10 sentences seen."""
     try:
-        p = Path(path)
-        key = (str(p), p.stat().st_mtime_ns)
-        if key not in _REF_F0:
-            w, sr_ = sf.read(str(p), dtype="float32")
-            w = w if w.ndim == 1 else w[:, 0]
-            if sr_ != audio.SR:
-                w = np.interp(np.linspace(0, len(w) - 1, int(len(w) * audio.SR / sr_)), np.arange(len(w)), w).astype(np.float32)
-            if len(_REF_F0) > 32:
-                _REF_F0.clear()
-            _REF_F0[key] = _f0_median_st(w)
-        return _REF_F0[key]
+        d = json.loads(_F0_BASE_FILE.read_text(encoding="utf-8"))
+        e = d.get(_ref_hash(Path(ref_path)))
+        return float(e["median"]) if e and int(e.get("n", 0)) >= 10 else None
     except Exception:
         return None
+
+
+def _f0_baseline_update(ref_path, f0s: list) -> None:
+    """Running estimate (bounded memory of the last 60 sentence pitches) — used only to judge future takes with too few sentences."""
+    vals = [float(x) for x in f0s if x is not None]
+    if len(vals) < 3:
+        return
+    try:
+        try:
+            d = json.loads(_F0_BASE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            d = {}
+        k = _ref_hash(Path(ref_path))
+        hist = (d.get(k) or {}).get("hist", []) + vals
+        hist = hist[-60:]
+        d[k] = {"median": float(np.median(hist)), "n": len(hist), "hist": hist}
+        if len(d) > 50:
+            d = dict(list(d.items())[-50:])
+        _F0_BASE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _F0_BASE_FILE.write_text(json.dumps(d), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _process_segment(w: np.ndarray, params: dict, fx: dict) -> np.ndarray:
@@ -306,7 +320,7 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
             if len(s["spoken"]) >= 12:
                 word_chk[i] = _asr_check(enh_waves[i], s["spoken"])
     f0_raw = {i: _f0_median_st(w) for i, w in enumerate(enh_waves) if len(w) >= 1.5 * audio.SR}
-    ref_f0 = _ref_f0(seg_ctx[0]["ref"]) if seg_ctx else None
+    ref_f0 = _f0_baseline(seg_ctx[0]["ref"]) if seg_ctx else None     # learned typical narration pitch (None until enough history)
     f0_a = qc.f0_assess([f0_raw.get(i) for i in range(len(segs))], ref_f0)        # robust statistics; reference anchor when few sentences
     med_f0 = f0_a["center"]
     f0_thr = f0_a["outlier_thr"] or 2.0
@@ -425,6 +439,8 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
                     pass
         after_b = {i: (lambda b: b - b[mid].mean())(audio._band_levels(enh_waves[i], audio.SR)) for i in long_ix}
         timbre["band_after"] = round(float(np.mean([np.abs(after_b[i] - target).mean() for i in long_ix])), 2)
+    if seg_ctx and len(f0_raw) >= 3:
+        _f0_baseline_update(seg_ctx[0]["ref"], [f0_raw.get(i) for i in range(len(segs))])
     for i, s in enumerate(segs):
         proc_clips.append(_process_segment(enh_waves[i], s["params"], v.get("fx") or {}))
         seg_meta[i]["seconds"] = round(len(proc_clips[-1]) / audio.SR, 2)
@@ -585,11 +601,11 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
     if fa_a and fa_a["mode"] != "insufficient":
         what = (f"انحراف النغمة القوي (MAD) بين {fa_a['n']} جملة {fa_b['spread']} ← {fa_a['spread']} نصف نغمة (الحد {fa_a['limit']})"
                 if fa_a["mode"] == "spread" else
-                f"عيّنة صغيرة ({fa_a['n']} جمل): لا يصح حساب انحراف بينها، فقُورنت كل جملة بنغمة مقطعك المرجعي — أبعد جملة {fa_a['spread']} نصف نغمة (الحد {fa_a['limit']})")
+                f"عيّنة صغيرة ({fa_a['n']} جمل): لا يصح حساب انحراف بينها، فقُورنت كل جملة بنغمة الراوي المعتادة المتعلَّمة من نسخه السابقة — أبعد جملة {fa_a['spread']} نصف نغمة (الحد {fa_a['limit']})")
         add("pitch", "ثبات طبقة الصوت بين الجمل", "ok" if fa_a["ok"] else "warn",
             what + (f" · صُحّحت {len(timbre['pitch_fixed'])} جملة" if timbre["pitch_fixed"] else ""), pitch_stats=fa_a)
     else:
-        add("pitch", "ثبات طبقة الصوت بين الجمل", "skipped", "لا جمل كافية لقياس موثوق للنغمة")
+        add("pitch", "ثبات طبقة الصوت بين الجمل", "skipped", "عيّنة صغيرة ولا توجد بعد نغمة معتادة متعلَّمة لهذا الصوت (تتكوّن بعد ~10 جمل) — لم يُقدَّر انحراف غير موثوق")
     if timbre["band_before"] is not None:
         add("tone", "ثبات جرس الصوت بين الجمل", "ok" if timbre["band_after"] <= 1.5 else "warn",
             f"فرق الطيف بين الجمل {timbre['band_before']} ← {timbre['band_after']} dB (الحد 1.5)" + (f" · عُدّلت {len(timbre['eq_fixed'])} جملة" if timbre["eq_fixed"] else ""))

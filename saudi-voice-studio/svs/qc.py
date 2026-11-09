@@ -125,14 +125,16 @@ def pause_noise_db(x: np.ndarray) -> float | None:
 
 
 F0_SPREAD_LIMIT = 1.5      # robust spread (semitones) allowed between sentence pitches when there are enough sentences
-F0_ANCHOR_LIMIT = 3.0      # with few sentences: max distance (semitones) of any sentence from the reference clip's pitch
+F0_ANCHOR_LIMIT = 2.5      # with few sentences: max distance (semitones) of any sentence from this voice's LEARNED typical narration pitch
 F0_MIN_N = 5               # fewer sentences than this cannot give a trustworthy spread estimate
 
 
-def f0_assess(f0s: list[float], ref_f0: float | None) -> dict:
+def f0_assess(f0s: list[float], baseline_f0: float | None) -> dict:
     """Statistically sound pitch-consistency assessment.
     * n >= 5: robust spread (1.4826 x MAD around the median) — outlier-resistant, unlike a plain std on a handful of values.
-    * n < 5: a spread of 2-4 numbers is not meaningful, so each sentence is compared with the REFERENCE clip's pitch instead.
+    * n < 5: a spread of 2-4 numbers is not meaningful, so each sentence is compared with a baseline instead: the voice's typical
+      narration pitch learned from its previous takes (NOT the reference clip — measured: the model narrates 3-4 semitones above a calm
+      reference reading, so the clip itself is a wrong anchor). With no baseline yet the check is honestly 'insufficient'.
     Returns {mode, n, center, spread, limit, ok, outliers: indices beyond limit}."""
     v = np.asarray([x for x in f0s if x is not None], dtype=float)
     n = len(v)
@@ -142,11 +144,11 @@ def f0_assess(f0s: list[float], ref_f0: float | None) -> dict:
         out = [i for i, x in enumerate(f0s) if x is not None and abs(x - med) > max(2.0, 2.0 * sd)]
         return {"mode": "spread", "n": n, "center": med, "spread": round(sd, 2), "limit": F0_SPREAD_LIMIT,
                 "ok": sd <= F0_SPREAD_LIMIT, "outlier_idx": out, "outlier_thr": 2.0}
-    if n >= 1 and ref_f0 is not None:
-        dev = [None if x is None else abs(x - ref_f0) for x in f0s]
+    if n >= 1 and baseline_f0 is not None:
+        dev = [None if x is None else abs(x - baseline_f0) for x in f0s]
         worst = max(d for d in dev if d is not None)
         out = [i for i, d in enumerate(dev) if d is not None and d > F0_ANCHOR_LIMIT]
-        return {"mode": "anchor", "n": n, "center": float(ref_f0), "spread": round(worst, 2), "limit": F0_ANCHOR_LIMIT,
+        return {"mode": "anchor", "n": n, "center": float(baseline_f0), "spread": round(worst, 2), "limit": F0_ANCHOR_LIMIT,
                 "ok": worst <= F0_ANCHOR_LIMIT, "outlier_idx": out, "outlier_thr": F0_ANCHOR_LIMIT}
     return {"mode": "insufficient", "n": n, "center": None, "spread": None, "limit": None, "ok": True, "outlier_idx": [], "outlier_thr": None}
 
