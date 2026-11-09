@@ -21,6 +21,11 @@ description: استوديو تعليق صوتي سعودي مجاني ومفتو
 6. لتحسين جملة واحدة: `regenerate_sentence(take_id, segment_id, emotion?, spoken?)` — لا تعِد النص كاملًا.
 7. `compare_takes(take_id)` يعطي مقاييس موضوعية قبل/بعد (ليست حكمًا سمعيًا).
 
+## الجودة والتحكم (v1.0)
+- الصوت **جاف افتراضيًا**؛ لا تضف `reverb` إلا بطلب صريح من المستخدم.
+- كل توليد يعيد `qc` (فحص تلقائي: قصّ، ضجيج، صدى، مستوى، سرعة، وقفات، كلمات، هوية). إن كانت الحالة `warn` فاذكر السبب للمستخدم بصدق، ويمكنك `regenerate_sentence`.
+- `controls_json` في `generate_voiceover`: `stability` `energy` `clarity` `warmth_db` `variation` `reverb` `denoise`. اتركها فارغة للوضع التلقائي.
+
 ## الأنماط
 narration سرد · ad إعلان · news نشرة · documentary وثائقي · story حكاية · conversation حوار.
 المشاعر: neutral joy sadness excitement calm confidence grandeur empathy suspense warning formal.

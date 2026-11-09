@@ -47,9 +47,25 @@ DEFAULT_CONTROLS = {
     "formality": 0.5,        # 0 casual … 1 formal (calms variation, lengthens closings)
     "variation": 1.0,        # anti-monotony jitter (0 = identical cadence … 1.5)
     "light_dialect": False,  # optional light MSA->dialect word swaps (see lexicon)
+    "stability": 0.6,        # rhythm stability: how strongly sentence speeds are pulled to one steady pace (0..1)
+    "energy": 0.0,           # -1 calm … +1 enthusiastic (speed, loudness, shorter pauses; never pitch)
+    "clarity": 0.5,          # articulation clarity: presence EQ and a slightly slower pace (0..1)
+    "warmth_db": 0.0,        # depth/warmth: low-shelf at 180 Hz, -3..+3 dB (does not change pitch)
+    "reverb": 0.0,           # EXPLICIT only. 0 = dry studio sound (default). Never added automatically.
+    "denoise": False,        # extra noise reduction on the finished audio (model output is already clean)
+}
+# Smart defaults per delivery style (used when the user has not set a control explicitly)
+STYLE_AUTO = {
+    "narration":    {"stability": 0.65, "clarity": 0.55, "energy": 0.0, "warmth_db": 0.5},
+    "ad":           {"stability": 0.5, "clarity": 0.6, "energy": 0.4, "warmth_db": 0.0},
+    "news":         {"stability": 0.9, "clarity": 0.8, "energy": 0.0, "warmth_db": 0.0},
+    "documentary":  {"stability": 0.8, "clarity": 0.6, "energy": -0.1, "warmth_db": 1.0},
+    "story":        {"stability": 0.6, "clarity": 0.5, "energy": 0.0, "warmth_db": 1.0},
+    "conversation": {"stability": 0.45, "clarity": 0.5, "energy": 0.1, "warmth_db": 0.5},
 }
 LIMITS = {"speed": (0.7, 1.3), "expressiveness": (0.0, 1.5), "tone_strength": (0.0, 1.5), "pause": (0.3, 2.0),
-          "formality": (0.0, 1.0), "variation": (0.0, 1.5)}
+          "formality": (0.0, 1.0), "variation": (0.0, 1.5), "stability": (0.0, 1.0), "energy": (-1.0, 1.0),
+          "clarity": (0.0, 1.0), "warmth_db": (-3.0, 3.0), "reverb": (0.0, 1.0)}
 OVERRIDE_LIMITS = {"speed_mul": (0.6, 1.5), "pitch_st": (-2.0, 2.0), "gain_db": (-6.0, 6.0),
                    "pause_before": (0.0, 3.0), "pause_after": (0.0, 4.0)}
 
@@ -63,6 +79,10 @@ def canon_emotion(e: str) -> str:
     return e if e in EMOTIONS else "neutral"
 
 
+def auto_controls(style: str | None) -> dict:
+    return dict(STYLE_AUTO.get(style or "narration", STYLE_AUTO["narration"]))
+
+
 def clean_controls(c: dict | None) -> dict:
     out = dict(DEFAULT_CONTROLS)
     for k, v in (c or {}).items():
@@ -71,7 +91,7 @@ def clean_controls(c: dict | None) -> dict:
                 out[k] = clamp(float(v), *LIMITS[k])
             except (TypeError, ValueError):
                 pass
-        elif k == "light_dialect":
+        elif k in ("light_dialect", "denoise"):
             out[k] = bool(v)
     return out
 
@@ -133,8 +153,13 @@ def compute(seg: dict, controls: dict, style: str, *, index: int, total: int, vo
     # formality: steadier, a touch slower, slightly longer closings
     speed *= 1 - 0.04 * c["formality"]
     p_after *= 1 + 0.25 * c["formality"]
-    # anti-monotony jitter
-    amp = c["variation"] * st[3] * e_var * (1 - 0.5 * c["formality"])
+    # energy (calm ↔ enthusiastic) and articulation clarity: tempo/loudness only, never pitch
+    speed *= 1 + 0.06 * c["energy"]
+    gain += 1.5 * c["energy"]
+    p_after *= max(0.6, 1 - 0.2 * c["energy"])
+    speed *= 1 - 0.04 * c["clarity"]
+    # anti-monotony jitter (a stable rhythm damps it)
+    amp = c["variation"] * st[3] * e_var * (1 - 0.5 * c["formality"]) * (1 - 0.6 * c["stability"])
     js, jp = _jitter(f"{index}|{text}", amp)
     speed *= 1 + js
     pitch += jp

@@ -40,8 +40,8 @@ def build(text: str, *, voice: str = "narrator_deep", dialect: str | None = None
     an = analysis.analyze(text, use_semantic=use_semantic)
     if len(an["sentences"]) > MAX_SEGMENTS:
         raise ValueError(f"عدد الجمل كبير ({len(an['sentences'])}). الحد {MAX_SEGMENTS}.")
-    ctrl = delivery.clean_controls(controls)
     style = style if style in delivery.STYLES else an["style"]
+    ctrl = delivery.clean_controls({**delivery.auto_controls(style), **(controls or {})})   # smart defaults, user wins
     plan_id = uuid.uuid4().hex[:10]
     segs = []
     for i, s in enumerate(an["sentences"]):

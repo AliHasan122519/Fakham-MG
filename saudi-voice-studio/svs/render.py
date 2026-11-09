@@ -19,7 +19,7 @@ from typing import Callable
 import numpy as np
 import soundfile as sf
 
-from . import asr, audio, config, expressive, history, plan as planmod, refaudio, speaker, voices
+from . import asr, audio, config, expressive, history, plan as planmod, qc, refaudio, speaker, voices
 from .engine import ENGINE
 
 CACHE = config.DATA / "cache"
@@ -157,6 +157,7 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
     if compare_raw is None:
         compare_raw = bool((plan_in.get("enhancement") or {}).get("compare_raw"))
     raw_clips, proc_clips, pauses, seg_meta = [], [], [], []
+    enh_waves, seg_ctx = [], []
     warnings: list[str] = []
     intel: dict[str, float] = {}
     stats = {"cache_hits": 0}
@@ -250,11 +251,77 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
         vm = _spk_sim(wave, ref)
         if vm is not None:
             match[s["id"]] = round(vm, 3)
-        raw_clips.append(wave)
-        proc_clips.append(_process_segment(wave, P, v.get("fx") or {}))
+        enh_waves.append(wave)
+        seg_ctx.append({"ref": ref, "ref_text": ref_text, "speed": speed, "nfe": nfe, "exag": exag, "cfg": cfg_w, "spoken": s["spoken"]})
         pauses.append((P["pause_before"], P["pause_after"]))
-        seg_meta.append({"id": s["id"], "ref_source": ref_src, "speed": round(speed, 3), "nfe": nfe, "diacritics": diac_note,
-                         "seconds": round(len(proc_clips[-1]) / audio.SR, 2)})
+        seg_meta.append({"id": s["id"], "ref_source": ref_src, "speed": round(speed, 3), "nfe": nfe, "diacritics": diac_note})
+
+    # ================= QC pass: detect → re-synthesise ONLY the affected sentences → harmonise pace → process
+    qc_notes: dict = {"fixed": [], "unresolved": []}
+    use_asr = _verify_on() and engine != "expressive"
+    def _asr_check(w, spoken):
+        heard = asr.transcribe(refaudio.audio_resample16(np.asarray(w, dtype=np.float32)))["text"]
+        return {"sim": asr.similarity(spoken, heard), **qc.word_diff(spoken, heard)}
+    def _bad(c):
+        return c["sim"] < MIN_INTELLIGIBILITY or c["missing"] > 0.25 or c["dup"] > 0
+    def _score(c, spk):
+        return c["sim"] - c["missing"] - 0.5 * min(c["dup"], 2) + 0.5 * (spk if spk is not None else 0.5)
+    word_chk: dict = {}
+    if use_asr:
+        progress(0.80, "فحص الكلمات المفقودة/المكررة")
+        for i, s in enumerate(segs):
+            if len(s["spoken"]) >= 12:
+                word_chk[i] = _asr_check(enh_waves[i], s["spoken"])
+    spk = {i: _spk_sim(enh_waves[i], seg_ctx[i]["ref"]) for i in range(len(segs))} if speaker.available() else {}
+    med_spk = float(np.median([x for x in spk.values() if x is not None])) if any(x is not None for x in spk.values()) else None
+    flagged = [i for i in range(len(segs)) if (i in word_chk and _bad(word_chk[i])) or
+               (med_spk is not None and spk.get(i) is not None and spk[i] < med_spk - 0.18 and len(enh_waves[i]) >= 1.5 * audio.SR and len(segs) >= 3)]
+    for i in flagged:
+        c0 = seg_ctx[i]
+        best_w, best_c, best_spk = enh_waves[i], word_chk.get(i), spk.get(i)
+        best_sc = _score(best_c, best_spk) if best_c else (best_spk or 0)
+        for k in (1, 2):
+            progress(0.82, f"إصلاح الجملة {i + 1} (محاولة {k})")
+            w2, _ = wave_for(c0["spoken"], c0["ref"], c0["ref_text"], c0["speed"], c0["nfe"],
+                             (int(segs[i]["seed"]) + 15485863 * k) & 0x7FFFFFFF, verify=False, label="", frac=0.82,
+                             exag=c0["exag"], cfg_w=c0["cfg"])
+            c2 = _asr_check(w2, c0["spoken"]) if (use_asr and len(c0["spoken"]) >= 12) else None
+            sp2 = _spk_sim(w2, c0["ref"]) if speaker.available() else None
+            sc2 = _score(c2, sp2) if c2 else (sp2 or 0)
+            if sc2 > best_sc + 0.02:
+                best_w, best_c, best_spk, best_sc = w2, c2, sp2, sc2
+        improved = best_w is not enh_waves[i]
+        enh_waves[i] = best_w
+        if best_c:
+            word_chk[i] = best_c
+        spk[i] = best_spk
+        (qc_notes["fixed"] if improved and (not best_c or not _bad(best_c)) else qc_notes["unresolved"]).append(segs[i]["id"])
+    # pace harmonisation: pull every sentence toward ONE steady pace (relative to its planned speed), within ±12 %
+    rates = [qc.chars_per_second(w, s["spoken"]) for w, s in zip(enh_waves, segs)]
+    norm = [(r / c["speed"]) if r else None for r, c in zip(rates, seg_ctx)]
+    valid = [x for x in norm if x]
+    cv_before = cv_after = None
+    stab = float(plan["controls"].get("stability", 0.6))
+    if len(valid) >= 2:
+        med = float(np.median(valid))
+        cv_before = round(float(np.std(valid) / np.mean(valid)), 3)
+        after = []
+        for i, n_ in enumerate(norm):
+            if not n_:
+                continue
+            f = float(np.clip(med / n_, 1 / 1.12, 1.12))
+            f = 1 + (f - 1) * stab
+            if abs(f - 1) > 0.015:
+                try:
+                    enh_waves[i] = audio.ffmpeg_wave(enh_waves[i], f"rubberband=tempo={f:.4f}:pitchq=quality" if audio.have_filter("rubberband") else f"atempo={f:.4f}")
+                except Exception:
+                    f = 1.0
+            after.append(n_ * f)
+        cv_after = round(float(np.std(after) / np.mean(after)), 3)
+    for i, s in enumerate(segs):
+        proc_clips.append(_process_segment(enh_waves[i], s["params"], v.get("fx") or {}))
+        seg_meta[i]["seconds"] = round(len(proc_clips[-1]) / audio.SR, 2)
+    raw_clips = list(enh_waves)
 
     baseline_kind = "model_output_same_text"
     if compare_raw:
@@ -295,7 +362,9 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
             ref_eq = audio.reference_eq(mix, rw)
         except Exception:
             ref_eq = None
-    af = audio.master_chain(v.get("fx"), profile, clean=clean, ref_eq=ref_eq)
+    C = plan["controls"]
+    af = audio.master_chain(v.get("fx"), profile, clean=bool(C.get("denoise")) or clean, ref_eq=ref_eq,
+                            warmth_db=C.get("warmth_db", 0.0), clarity=C.get("clarity", 0.5), reverb=C.get("reverb", 0.0))
     audio.process(d / "raw_in.wav", d / "raw.wav", None, audio.leveled_only())
     audio.process(d / "mix_in.wav", d / "master.wav", None, af)
     audio.encode(d / "raw.wav", d / "raw.mp3")
@@ -329,12 +398,61 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
             return round(asr.similarity(target, asr.transcribe(x16)["text"]), 3)
         cmp_intel = {"before": _sim(d / "raw.wav"), "after": _sim(d / "master.wav"),
                      "note": "تطابق تفريغ الصوت مع النص المصحّح (1.0 = مطابق تمامًا) — مقياس آلي لا يغني عن الاستماع."}
+    # ---------- QC report (every number below is measured on THIS take)
+    checks = []
+    def add(cid, name, st, detail, **extra):
+        checks.append({"id": cid, "name": name, "status": st, "detail": detail, **extra})
+    mw, _ = sf.read(str(d / "master.wav"), dtype="float32")
+    mw = mw if mw.ndim == 1 else mw[:, 0]
+    clipped = float(np.mean(np.abs(mw) > 0.99))
+    tp = m_master.get("true_peak_db")
+    add("clipping", "التقطيع والتشويه", "ok" if (clipped == 0 and (tp is None or tp <= -1.0)) else "fail",
+        f"ذروة {tp} dBTP · عيّنات مقصوصة {clipped * 100:.3f}%")
+    nf = [qc.noise_floor_db(w) for w in enh_waves]
+    nfv = [x for x in nf if x is not None]
+    add("noise", "الضوضاء والوشوشة", "ok" if (not nfv or max(nfv) <= -45) else "warn",
+        f"أعلى أرضية ضجيج بين الجمل {round(max(nfv), 1) if nfv else '—'} dBFS (الحد −45)")
+    rt = [qc.reverb_tail_db(w) for w in enh_waves]
+    rtv = [x for x in rt if x is not None]
+    add("reverb", "الصدى والارتداد", "ok" if (not rtv or float(np.median(rtv)) <= -20) else "warn",
+        f"ذيل ما بعد الكلام {round(float(np.median(rtv)), 1) if rtv else '—'} dB (الجاف ≲ −20)" + ("" if C.get("reverb", 0) == 0 else " · أُضيف صدى بطلبك"))
+    rms_resid = [audio.active_rms_db(c) - float(s["params"]["gain_db"]) for c, s in zip(proc_clips, segs)]
+    sd = float(np.std(rms_resid)) if len(rms_resid) > 1 else 0.0
+    add("level", "ثبات مستوى الصوت بين الجمل", "ok" if sd <= 1.2 else "warn", f"الانحراف {sd:.2f} dB بعد استبعاد الجهارة المخططة (الحد 1.2)")
+    if cv_after is not None:
+        off = [segs[i]["id"] for i, n_ in enumerate(norm) if n_ and abs(n_ - med) / med > 0.15]
+        add("rate", "اتزان سرعة الحديث", "ok" if cv_after <= 0.10 else "warn",
+            f"تذبذب السرعة بين الجمل (CV) {cv_before} ← {cv_after} بعد التوحيد (الحد 0.10)", before=cv_before, after=cv_after, off_by_15pct=off)
+    else:
+        add("rate", "اتزان سرعة الحديث", "skipped", "تحتاج جملتين طويلتين على الأقل للقياس")
+    maxp = max([p_[1] for p_ in pauses] + [p_[0] for p_ in pauses])
+    exp_len = sum(len(c) for c in proc_clips) / audio.SR + sum(a_ + b_ for a_, b_ in pauses)
+    gap_err = abs(m_master["duration_s"] - exp_len)
+    add("pauses", "الوقفات والفراغات والتداخل", "ok" if (maxp <= 3.0 and gap_err <= 0.6) else "warn",
+        f"أطول وقفة {maxp:.2f} ث · فرق المدة عن المخطط {gap_err:.2f} ث")
+    if word_chk:
+        bad_now = [segs[i]["id"] for i, c in word_chk.items() if _bad(c)]
+        add("words", "الكلمات المفقودة/المكررة والنطق الواضح", "ok" if not bad_now else "warn",
+            ("كل الجمل سليمة" if not bad_now else f"جمل بها مشكلة: {', '.join(bad_now)}") + (f" · أُصلحت تلقائيًا: {', '.join(qc_notes['fixed'])}" if qc_notes["fixed"] else ""),
+            per_sentence={segs[i]["id"]: {"similarity": round(c["sim"], 3), "missing": c["missing"], "dup": c["dup"]} for i, c in word_chk.items()})
+    else:
+        add("words", "الكلمات المفقودة/المكررة والنطق الواضح", "skipped", "التعرف الآلي غير متاح أو الجمل قصيرة")
+    sv = [x for x in spk.values() if x is not None]
+    if len(sv) >= 2:
+        spread = max(sv) - min(sv)
+        add("identity", "ثبات هوية الراوي بين الجمل", "ok" if spread <= 0.25 else "warn",
+            f"تفاوت تشابه البصمة بين الجمل {spread:.2f} (الحد 0.25)" + (f" · أُعيدت: {', '.join(qc_notes['fixed'])}" if qc_notes["fixed"] else ""))
+    else:
+        add("identity", "ثبات هوية الراوي بين الجمل", "skipped", "نموذج البصمة غير متاح أو الجمل قصيرة")
+    st_all = "fail" if any(c["status"] == "fail" for c in checks) else ("warn" if any(c["status"] == "warn" for c in checks) else "ok")
+    qc_report = {"status": st_all, "checks": checks, "fixed_sentences": qc_notes["fixed"], "unresolved_sentences": qc_notes["unresolved"],
+                 "rate_cv": {"before": cv_before, "after": cv_after}}
     took = time.time() - t0
     secs = m_master["duration_s"]
     if intel and all(v < 0.3 for v in intel.values()) and len(intel) == len(segs):
         raise RenderError("الصوت الناتج غير مفهوم في كل الجمل — غالبًا المقطع المرجعي ضعيف أو مشوّش. "
                           "أعد رفع مقطع أنظف (٥–١٠ ثوانٍ، بلا ضجيج) من تبويب الشخصيات.")
-    take = {"id": take_id, "parent": parent, "intelligibility": intel, "baseline_kind": baseline_kind,
+    take = {"id": take_id, "parent": parent, "intelligibility": intel, "baseline_kind": baseline_kind, "qc": qc_report,
             "voice_match": ({"final": None, "mean": round(float(np.mean(list(match.values()))), 3), "min": round(float(min(match.values())), 3),
                              "per_sentence": match, "candidates": candidates,
                              "scale": "غير المتشابهين ≈ 0.0–0.3 · نفس المتحدث ≈ 0.7+"} if match else None),

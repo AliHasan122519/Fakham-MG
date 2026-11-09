@@ -113,7 +113,7 @@ def test_variation_zero_removes_jitter_and_expressiveness_scales():
 def test_style_is_relative_to_persona_no_double_slowdown():
     p = planmod.build("جملة عادية تمامًا.", voice="documentary_cinematic", style="documentary",
                       controls={"variation": 0, "formality": 0})
-    assert p["segments"][0]["params"]["speed_mul"] > 0.9
+    assert p["segments"][0]["params"]["speed_mul"] > 0.85      # was 0.69 when persona and style speeds stacked
 
 
 def test_manual_mode_uses_one_emotion_but_keeps_suggestions():
@@ -225,3 +225,81 @@ def test_reference_eq_moves_spectrum_toward_reference_and_is_clamped():
     fixed = audio.ffmpeg_wave(thin, ",".join(eq))
     after = np.abs(audio._band_levels(fixed, sr) - audio._band_levels(full, sr)).mean()
     assert after < before
+
+
+# ---------------------------------------------------------------- v1.0: dry sound, pro controls, QC, pace harmonisation, export
+def test_default_sound_is_dry_no_reverb_anywhere():
+    import json
+    from svs import config
+    d = json.loads((config.ROOT / "voices" / "presets.json").read_text(encoding="utf-8"))
+    assert all("reverb" not in v["fx"] for v in d["voices"])
+    assert "aecho" not in audio.master_chain({}, {"hf4": 0.03, "hf8": 0.001})
+    assert "aecho" in audio.master_chain({}, {"hf4": 0.03, "hf8": 0.001}, reverb=0.3)       # only on explicit request
+    p = planmod.build("نص تجريبي.", voice="documentary_cinematic")
+    assert p["controls"]["reverb"] == 0.0 and p["controls"]["denoise"] is False
+
+
+def test_style_auto_defaults_and_user_override():
+    a = planmod.build("نص تجريبي.", voice="narrator_deep", style="news")["controls"]
+    assert a["stability"] == 0.9 and a["clarity"] == 0.8                                      # smart defaults for news
+    b = planmod.build("نص تجريبي.", voice="narrator_deep", style="news", controls={"stability": 0.2})["controls"]
+    assert b["stability"] == 0.2 and b["clarity"] == 0.8                                      # explicit value wins, others stay smart
+
+
+def test_pro_controls_change_the_result():
+    base = planmod.build("احذر! الطريق خطير ممنوع الاقتراب.", voice="narrator_deep", controls={"variation": 0, "energy": 0, "clarity": 0.5})
+    hot = planmod.build("احذر! الطريق خطير ممنوع الاقتراب.", voice="narrator_deep", controls={"variation": 0, "energy": 1.0, "clarity": 0.5})
+    calm = planmod.build("احذر! الطريق خطير ممنوع الاقتراب.", voice="narrator_deep", controls={"variation": 0, "energy": -1.0, "clarity": 0.5})
+    pb, ph, pc = (x["segments"][0]["params"] for x in (base, hot, calm))
+    assert ph["speed_mul"] > pb["speed_mul"] > pc["speed_mul"] and ph["gain_db"] > pb["gain_db"] > pc["gain_db"]
+    assert ph["pitch_st"] == pb["pitch_st"] == pc["pitch_st"]                                  # energy never touches pitch
+    clear = planmod.build("جملة.", voice="narrator_deep", controls={"clarity": 1.0, "variation": 0})["segments"][0]["params"]["speed_mul"]
+    mush = planmod.build("جملة.", voice="narrator_deep", controls={"clarity": 0.0, "variation": 0})["segments"][0]["params"]["speed_mul"]
+    assert clear < mush
+    assert "bass=g=2.0" in audio.master_chain({}, {}, warmth_db=2.0) and "bass=g" not in audio.master_chain({}, {}, warmth_db=0.0)
+    assert "equalizer=f=3200:t=q:w=1.0:g=2.0" in audio.master_chain({}, {}, clarity=1.0)
+
+
+def test_qc_helpers():
+    from svs import qc
+    assert qc.word_diff("ذهب القوم إلى السوق", "ذهب القوم إلى السوق") == {"missing": 0.0, "dup": 0}
+    assert qc.word_diff("ذهب القوم إلى السوق", "ذهب السوق")["missing"] >= 0.4
+    assert qc.word_diff("ذهب القوم إلى السوق", "ذهب القوم القوم إلى السوق")["dup"] == 1
+    assert qc.word_diff("أنا أحبك حبا جما", "انا احبك حبا جما")["missing"] == 0.0         # spelling variants are not "missing"
+    sr = 24000
+    t = np.arange(sr * 2) / sr
+    voice = (0.3 * np.sin(2 * np.pi * 150 * t) * (np.sin(2 * np.pi * 1.5 * t) > 0)).astype(np.float32)
+    dry = voice
+    rng = np.random.default_rng(1)
+    ir = (rng.standard_normal(int(sr * 0.5)) * np.exp(-np.arange(int(sr * 0.5)) / sr / 0.12)).astype(np.float32)
+    ir[0] = 120.0                                                                                     # direct sound + room tail
+    wet = np.convolve(voice, ir)[: len(voice)].astype(np.float32)
+    rd, rw = qc.reverb_tail_db(dry), qc.reverb_tail_db(wet)
+    assert rd is not None and rw is not None and rw > rd + 20 and rw > -35, (rd, rw)               # a room tail is detected
+
+
+def test_take_has_qc_report_pace_harmonisation_and_24bit_wav():
+    import soundfile as sf
+    text = ("وصلنا إلى المدينة في الصباح الباكر. ثم ذهبنا إلى السوق القديم لنشتري بعض الهدايا لأهلنا وأصدقائنا. "
+            "وفي المساء عدنا إلى البيت متعبين لكن سعداء. كانت رحلة جميلة لا تُنسى أبدًا.")
+    def odd_pace(spoken, ref, ref_text, *, engine, speed, nfe, seed):
+        sr = 24000
+        factor = [0.9, 1.1, 0.94, 1.06][len(spoken) % 4]                  # the model "randomly" speaks too fast/slow
+        n = int(sr * len(spoken) * 0.07 * factor / speed)
+        t = np.arange(n) / sr
+        w = sum(np.sin(2 * np.pi * 140 * h * t) / h for h in range(1, 8)) * (0.6 + 0.4 * np.sin(2 * np.pi * 3 * t) ** 2)
+        return (0.2 * w).astype(np.float32), sr
+    p = planmod.build(text, voice="narrator_deep", controls={"stability": 1.0})
+    take = render.render(p, synth_fn=odd_pace)
+    q = take["qc"]
+    rate = next(c for c in q["checks"] if c["id"] == "rate")
+    assert rate["before"] > 0.05 and rate["after"] < rate["before"] * 0.5, rate
+    ids = {c["id"] for c in q["checks"]}
+    assert {"clipping", "noise", "reverb", "level", "rate", "pauses", "words", "identity"} <= ids
+    assert next(c for c in q["checks"] if c["id"] == "clipping")["status"] == "ok"
+    d = render.TAKES / take["id"]
+    assert sf.info(str(d / "master.wav")).subtype == "PCM_24"
+    import subprocess, json as _j
+    br = int(_j.loads(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=bit_rate", "-of", "json", str(d / "master.mp3")],
+                                     capture_output=True, text=True).stdout)["format"]["bit_rate"])
+    assert br >= 300000

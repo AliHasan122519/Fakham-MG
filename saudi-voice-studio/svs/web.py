@@ -143,6 +143,8 @@ class AutoReq(BaseModel):
     dialect: str | None = None
     max_quality: bool = False
     review: bool = False
+    style: str | None = None
+    controls: dict | None = None          # only the keys the user touched; everything else stays automatic
 
 
 @app.post("/api/auto", dependencies=[Depends(auth)])
@@ -153,7 +155,8 @@ def api_auto(req: AutoReq):
         voice = voices.default_voice_id()
     if req.review:
         try:
-            return enhance.smart_enhance(req.text, voice=voice, dialect=req.dialect, compare_raw=False)
+            return enhance.smart_enhance(req.text, voice=voice, dialect=req.dialect, compare_raw=False,
+                                         style=req.style or None, controls=req.controls)
         except (ValueError, KeyError) as e:
             raise HTTPException(400, str(e))
     if jobs.running_count() >= jobs.MAX_RUNNING:
@@ -164,7 +167,8 @@ def api_auto(req: AutoReq):
     except (KeyError, ValueError) as e:
         raise HTTPException(400, str(e))
     return {"job": jobs.start(lambda progress=None, **kw: auto.run(progress=progress, **kw),
-                              text=req.text, voice=voice, dialect=req.dialect, max_quality=req.max_quality)}
+                              text=req.text, voice=voice, dialect=req.dialect, max_quality=req.max_quality,
+                              style=req.style or None, controls=req.controls)}
 
 
 @app.post("/api/voices/{voice_id}/sample", dependencies=[Depends(auth)])

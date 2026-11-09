@@ -142,7 +142,7 @@ def test_waqf_and_tashkeel_rules():
 def test_user_voice_does_not_inherit_identity_shift():
     from svs import voices
     v = voices.create_voice("ident_unit", "هوية", base_on="documentary_cinematic")
-    assert "pitch_st" not in v["fx"] and v["fx"].get("reverb") == 0.28      # mastering style kept, identity shift dropped
+    assert "pitch_st" not in v["fx"] and v["fx"].get("bass_db") == 4      # mastering style kept, identity shift dropped
     voices.delete_voice("ident_unit")
 
 

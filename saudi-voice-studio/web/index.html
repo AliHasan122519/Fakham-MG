@@ -78,12 +78,21 @@ table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{padding:5px 4px
       <label><input id="hmax" type="checkbox"> جودة قصوى (أبطأ: يجرّب عدة نسخ ويختار الأقرب لصوتك)</label>
       <label><input id="hreview" type="checkbox"> أريد مراجعة الخطة قبل التوليد</label>
     </details>
+    <details id="hpro"><summary>🎚 إعدادات الاستوديو (كلها «تلقائي» حتى تحرّكها)</summary>
+      <p class="note">الوضع التلقائي يختار القيم المناسبة لنوع النص. حرّك أي منزلق ليصبح يدويًا؛ الباقي يبقى تلقائيًا. الصوت <b>جاف ونظيف</b> افتراضيًا — لا صدى إلا إن طلبته.</p>
+      <label for="hstyle">الأسلوب</label><select id="hstyle"></select>
+      <div id="hsliders"></div>
+      <label><input id="hdenoise" type="checkbox"> تنقية إضافية للضجيج (اختيارية؛ الصوت المولَّد نظيف أصلًا)</label>
+      <button class="btn ghost sm" id="hreset" type="button">↺ إعادة الكل إلى تلقائي</button>
+    </details>
   </div>
   <div class="card hide" id="hres">
     <b>النتيجة</b>
     <audio id="hplayer" controls preload="auto"></audio>
     <div class="row" style="margin-top:8px"><a class="btn sm" id="hdl" download>⬇ تنزيل MP3</a><a class="btn sm ghost" id="hdlw" download>⬇ WAV</a></div>
     <div class="note" id="hmeta" style="margin-top:8px"></div>
+    <details id="hqcbox" open><summary id="hqcsum">فحص الجودة التلقائي</summary><div id="hqc" class="note"></div></details>
+    <div class="row" style="margin-top:8px"><button class="btn ghost sm" id="hregen" type="button">🔁 أعد التوليد (نسخة جديدة)</button></div>
   </div>
   <p class="note" style="text-align:center"><a href="#" id="toAdv" style="color:var(--mute)">⚙ متقدم</a></p>
 </section>
@@ -408,6 +417,28 @@ async function sysLoad(){$('#sys').textContent=JSON.stringify(await api('/api/st
 function showHome(){$('#t-home').classList.remove('hide');$('#adv').classList.add('hide');window.scrollTo(0,0)}
 function showAdv(){$('#t-home').classList.add('hide');$('#adv').classList.remove('hide');tab('compose')}
 $('#toAdv').onclick=e=>{e.preventDefault();showAdv()};$('#toHome').onclick=e=>{e.preventDefault();showHome()};
+const PRO=[['variation','واقعية وتنويع الأداء','0','1.5','0.05'],['stability','ثبات الإيقاع والسرعة','0','1','0.05'],
+ ['speed','سرعة الحديث','0.7','1.3','0.01'],['expressiveness','شدة المشاعر','0','1.5','0.05'],['tone_strength','قوة النبرة','0','1.5','0.05'],
+ ['clarity','وضوح المخارج','0','1','0.05'],['warmth_db','العمق والدفء (dB)','-3','3','0.5'],['energy','هدوء ← حماس','-1','1','0.1'],
+ ['pause','الوقفات والأنفاس','0.3','2','0.05'],['reverb','صدى (اختياري — الافتراضي جاف)','0','1','0.05']];
+const PROT=new Set();
+function proInit(){
+  const d=(S.meta&&S.meta.controls)||{};
+  opt($('#hstyle'),[['','تلقائي (حسب نوع النص)'],...Object.entries(S.meta.styles||{}).map(([k,x])=>[k,x.name_ar])]);
+  $('#hsliders').innerHTML=PRO.map(([k,n,lo,hi,st])=>`<label>${n}: <b id="hpv_${k}">تلقائي</b></label><input type="range" id="hp_${k}" min="${lo}" max="${hi}" step="${st}" value="${d[k]??lo}">`).join('');
+  PRO.forEach(([k])=>{const el=$('#hp_'+k);el.oninput=()=>{PROT.add(k);$('#hpv_'+k).textContent=(+el.value).toFixed(2)}});
+  $('#hreset').onclick=()=>{PROT.clear();PRO.forEach(([k])=>{$('#hpv_'+k).textContent='تلقائي';$('#hp_'+k).value=(S.meta.controls||{})[k]??$('#hp_'+k).min});$('#hdenoise').checked=false;$('#hstyle').value=''}}
+function proControls(){const o={};PROT.forEach(k=>o[k]=+$('#hp_'+k).value);if($('#hdenoise').checked)o.denoise=true;return o}
+const QCI={ok:'✔',fixed:'🔧',warn:'⚠',fail:'✖',skipped:'—'};
+function renderQC(qc){
+  if(!qc){$('#hqcbox').classList.add('hide');return}
+  $('#hqcbox').classList.remove('hide');
+  const word={ok:'سليم',warn:'يحتاج انتباهًا',fail:'فشل',fixed:'أُصلح تلقائيًا'}[qc.status]||qc.status;
+  $('#hqcsum').textContent='فحص الجودة التلقائي — '+word;
+  const fx=(qc.fixed_sentences||[]).length,un=(qc.unresolved_sentences||[]).length;
+  $('#hqc').innerHTML=(qc.checks||[]).map(c=>`<div>${QCI[c.status]||'•'} <b>${esc(c.name)}</b> — ${esc(c.detail||'')}</div>`).join('')
+   +(fx?`<div>🔧 أُعيد توليد ${fx} جملة تلقائيًا فقط (لا النص كله).</div>`:'')
+   +(un?`<div class="warn">⚠ ${un} جملة بقيت مشكوكًا فيها؛ استمع إليها ويمكنك إعادة التوليد.</div>`:'')}
 function homeInit(){
   const own=S.voices.find(v=>v.is_default&&v.reference_source==='own');
   $('#ob').classList.toggle('hide',!!own);
@@ -442,7 +473,7 @@ $('#obuse').onclick=async()=>{$('#oberr').textContent='';
 $('#hgo').onclick=async()=>{$('#herr').textContent='';$('#hres').classList.add('hide');const text=$('#htext').value.trim();
   if(!text){$('#herr').textContent='اكتب نصًا أولًا.';return}
   $('#hgo').disabled=true;$('#hbar').classList.remove('hide');$('#hbarf').style.width='3%';$('#hmsg').textContent='⏳ أبدأ…';
-  try{const body={text,voice:S.sel||null,dialect:$('#hdialect').value||null,max_quality:$('#hmax').checked,review:$('#hreview').checked};
+  try{const body={text,voice:S.sel||null,dialect:$('#hdialect').value||null,max_quality:$('#hmax').checked,review:$('#hreview').checked,style:$('#hstyle').value||null,controls:proControls()};
     const r=await jpost('/api/auto',body);
     if(r.segments){S.plan=r;S.take=null;renderPlan();showAdv();tab('plan');return}
     for(;;){await new Promise(x=>setTimeout(x,1500));const j=await api('/api/jobs/'+r.job);$('#hbarf').style.width=Math.max(3,j.progress*100)+'%';$('#hmsg').textContent='⏳ '+(j.message||'');
@@ -452,9 +483,10 @@ $('#hgo').onclick=async()=>{$('#herr').textContent='';$('#hres').classList.add('
         const vm=t.voice_match,vf=vm&&(vm.final!=null?vm.final:vm.mean);$('#hmeta').innerHTML=esc(`${t.seconds}ث · استغرق ${t.took}ث`)+(vm?`<br>تشابه الصوت مع مقطعك (الملف النهائي): <b>${vf.toFixed(2)}</b> <span class="note">(${esc(vm.scale)})</span>${vf<0.4?'<br><span class="warn">⚠ التشابه منخفض؛ جرّب مقطعًا مرجعيًا أوضح أو أطول قليلًا.</span>':''}`:'')
           +((t.warnings||[]).includes('demo')?'<br><span class="warn">⚠ يستخدم مقطعًا تجريبيًا؛ ارفع صوتك في الخطوة ١.</span>':'')
           +((t.warnings||[]).filter(w=>w.startsWith('low_intelligibility')).map(w=>`<br><span class="warn">⚠ الجملة ${esc(w.split(':')[1])} قليلة الوضوح (${esc(w.split(':')[2])}%).</span>`).join(''));
-        $('#hbarf').style.width='100%';$('#hmsg').textContent='تم ✔';break}}
+        renderQC(t.qc);$('#hbarf').style.width='100%';$('#hmsg').textContent='تم ✔';break}}
   }catch(e){$('#herr').textContent=e.message}finally{$('#hgo').disabled=false}};
-load().then(homeInit).catch(e=>{$('#herr').textContent=e.message});
+$('#hregen').onclick=()=>$('#hgo').click();
+load().then(()=>{proInit();homeInit()}).catch(e=>{$('#herr').textContent=e.message});
 </script>
 </body>
 </html>

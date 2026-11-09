@@ -16,19 +16,21 @@ GENRE_NARRATOR = {"ad": "promo_energetic", "news": "anchor_formal", "announcemen
 
 
 def run(text: str = "", *, voice: str | None = None, dialect: str | None = None, max_quality: bool = False,
-        progress: Callable[[float, str], None] | None = None, plan: dict | None = None) -> dict:
+        progress: Callable[[float, str], None] | None = None, plan: dict | None = None,
+        style: str | None = None, controls: dict | None = None) -> dict:
     progress = progress or (lambda p, m: None)
     voice = voice or voices.default_voice_id()
     if voice == "auto":                    # pick the narrator from the detected type of text
         progress(0.02, "اختيار الراوي المناسب لنوع النص")
         base = enhance.smart_enhance(text, voice=voices.default_voice_id(), dialect=dialect, mode="auto",
-                                     diacritics="none", compare_raw=False)
+                                     diacritics="none", compare_raw=False, style=style, controls=controls)
         cand = GENRE_NARRATOR.get(base["genre"])
         avail = {v["id"]: v for v in voices.list_voices()}
         voice = cand if cand in avail and avail[cand]["reference_source"] in ("derived", "own") else voices.default_voice_id()
     if plan is None:
         progress(0.02, "تحليل المعنى وتجهيز الإلقاء")
-        plan = enhance.smart_enhance(text, voice=voice, dialect=dialect, mode="auto", diacritics="selective", compare_raw=False)
+        plan = enhance.smart_enhance(text, voice=voice, dialect=dialect, mode="auto", diacritics="selective", compare_raw=False,
+                                     style=style, controls=controls)
     cand = render.default_candidates()
     if max_quality:
         cand = max(cand, 3)

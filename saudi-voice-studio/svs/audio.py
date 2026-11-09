@@ -55,7 +55,7 @@ def process(src_wav: Path, dst_wav: Path, dst_mp3: Path | None, af: str) -> None
     if not have_ffmpeg():
         raise RuntimeError("ffmpeg غير مثبت — ثبّته مجانًا: sudo apt install ffmpeg")
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src_wav), "-af", af, "-ar", str(SR),
-                    "-ac", "1", str(dst_wav)], check=True)
+                    "-ac", "1", "-c:a", "pcm_s24le", str(dst_wav)], check=True)
     if dst_mp3:
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(dst_wav), "-codec:a", "libmp3lame",
                         "-b:a", "192k", str(dst_mp3)], check=True)
@@ -200,7 +200,7 @@ def reference_eq(generated: np.ndarray, reference: np.ndarray, sr: int = SR, max
 
 
 def master_chain(fx: dict | None, profile: dict, *, clean: bool = False, target_lufs: float = -16.0,
-                 ref_eq: list[str] | None = None) -> str:
+                 ref_eq: list[str] | None = None, warmth_db: float = 0.0, clarity: float = 0.5, reverb: float = 0.0) -> str:
     """Mastering chain, deliberately gentle so the voice keeps its character.
 
     Adaptive part: the model's vocoder output is often dull above 4 kHz (low `hf4`) or harsh/metallic around 7-9 kHz
@@ -226,9 +226,14 @@ def master_chain(fx: dict | None, profile: dict, *, clean: bool = False, target_
         f.append(f"treble=g={float(fx['treble_db'])}:f=4500:w=0.7")
     if fx.get("highpass_hz"):
         f.append(f"highpass=f={int(fx['highpass_hz'])}")
+    if abs(warmth_db) >= 0.2:
+        f.append(f"bass=g={float(warmth_db):.1f}:f=180:w=0.7")      # depth/warmth without touching pitch
+    cl = (float(clarity) - 0.5) * 4.0                              # clarity 0..1 → -2..+2 dB presence at 3.2 kHz
+    if abs(cl) >= 0.3:
+        f.append(f"equalizer=f=3200:t=q:w=1.0:g={cl:.1f}")
     if fx.get("compress", True):
         f.append("acompressor=threshold=-21dB:ratio=2.2:attack=20:release=220:makeup=1.5")
-    rv = float(fx.get("reverb", 0) or 0)
+    rv = float(reverb or 0)                                       # EXPLICIT only; the default sound is dry
     if rv > 0:
         f.append(f"aecho=0.8:{0.25 + 0.35 * rv:.2f}:{int(60 + 80 * rv)}|{int(140 + 160 * rv)}:{0.18 * rv + 0.05:.2f}|{0.12 * rv + 0.03:.2f}")
     f.append(f"loudnorm=I={target_lufs}:TP=-1.5:LRA=9")
@@ -241,7 +246,7 @@ def leveled_only(target_lufs: float = -16.0) -> str:
     return f"loudnorm=I={target_lufs}:TP=-1.5:LRA=11"
 
 
-def encode(src_wav: Path, dst_mp3: Path, *, bitrate: str = "256k") -> None:
+def encode(src_wav: Path, dst_mp3: Path, *, bitrate: str = "320k") -> None:
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src_wav), "-ar", "44100", "-ac", "1",
                     "-codec:a", "libmp3lame", "-b:a", bitrate, str(dst_mp3)], check=True, timeout=300)
 

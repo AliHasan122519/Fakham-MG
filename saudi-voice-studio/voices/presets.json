@@ -80,14 +80,13 @@
       "fx": {
         "pitch_st": -2.2,
         "bass_db": 3,
-        "compress": true,
-        "reverb": 0.1
+        "compress": true
       },
       "ref_audio": null,
       "ref_text": null,
       "ref_id": "hijazi",
       "style": "narration",
-      "identity": "صوت رجالي عميق: مقطع مرجعي منخفض الطبقة (≈111Hz) + خفض هوية الصوت 2.2 نصف نغمة مع إزاحة الصيغ + دفء منخفض.",
+      "identity": "صوت رجالي عميق: مقطع مرجعي منخفض الطبقة (≈111Hz) + خفض هوية الصوت 2.2 نصف نغمة مع إزاحة الصيغ .",
       "derive_from_own": true,
       "sample_text": "في قلب الصحراء، حيث يلتقي الرمل بالسماء، تُروى حكايات الأجداد."
     },
@@ -146,8 +145,7 @@
       "nfe_step": 32,
       "fx": {
         "compress": true,
-        "treble_db": 0.8,
-        "reverb": 0.06
+        "treble_db": 0.8
       },
       "ref_audio": null,
       "ref_text": null,
@@ -169,14 +167,13 @@
       "fx": {
         "pitch_st": -3.0,
         "bass_db": 4,
-        "compress": true,
-        "reverb": 0.28
+        "compress": true
       },
       "ref_audio": null,
       "ref_text": null,
       "ref_id": "najdi",
       "style": "documentary",
-      "identity": "مهيب سينمائي: مقطع نجدي + خفض هوية 3.4 نصف نغمة + صدى قاعة خفيف + إيقاع بطيء ووقفات أطول.",
+      "identity": "مهيب سينمائي: مقطع نجدي + خفض هوية 3.4 نصف نغمة + إيقاع بطيء ووقفات أطول.",
       "derive_from_own": true,
       "sample_text": "عبر القرون، ظلّ هذا المكان شاهدًا على مجد لا يزول."
     }
