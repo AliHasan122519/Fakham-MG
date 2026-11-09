@@ -133,7 +133,7 @@ def main() -> int:
                 return t_
         return round(total, 1)
     t_syn, t_asm, t_end = at(0.80), at(0.90), round(total, 1)
-    out["full_take"]["stages_s"] = {"synthesis_and_checks": t_syn, "assembly_and_cleanup": round(t_asm - t_syn, 1),
+    out["full_take"]["stages_s"] = {"synthesis_of_all_sentences": t_syn, "qc_repair_rerolls_and_assembly": round(t_asm - t_syn, 1),
                                     "final_processing_and_export": round(t_end - t_asm, 1)}
     out["full_take"]["resources"] = sam.report(sam_mark)
     print("نص كامل:", json.dumps(out["full_take"], ensure_ascii=False))

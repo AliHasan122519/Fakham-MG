@@ -512,8 +512,7 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
         add("identity", "ثبات هوية الراوي بين الجمل", "skipped", "نموذج البصمة غير متاح أو الجمل قصيرة")
     # processing transparency: the master must still be the same voice as the unprocessed mix (no identity/tone damage)
     try:
-        mi, _ = sf.read(str(d / "mix_in.wav"), dtype="float32")
-        mi = mi if mi.ndim == 1 else mi[:, 0]
+        mi = np.asarray(mix, dtype=np.float32)               # the unmastered mix kept in memory (the file is removed after mastering)
         n_ = min(len(mi), len(mw))
         td = _cleanup._tonal_distance(mi[:n_], mw[:n_])
         sp_pm = speaker.similarity(refaudio.audio_resample16(mi[:n_ ][: 24000 * 20]), refaudio.audio_resample16(mw[:n_][: 24000 * 20])) if speaker.available() else None

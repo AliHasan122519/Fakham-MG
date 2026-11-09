@@ -9,7 +9,7 @@ ENABLE_SMART_ENHANCEMENT = True  #@param {type:"boolean"}
 ENABLE_EXPRESSIVE_ENGINE = False  #@param {type:"boolean"}
 #@markdown (اختياري — تجريبي: محرك Chatterbox المفتوح MIT بمفتاح تعبير حقيقي للفصحى فقط. يضيف بيئة منفصلة ~5GB + أوزان 3.3GB ووقت تثبيت أطول. اتركه معطّلًا في أول تشغيل.)
 STABLE_WORKER_URL = ""  #@param {type:"string"}
-#@markdown (اختياري — رابط MCP ثابت لا يتغير بين التشغيلات: ضع هنا رابط Worker المجاني الذي أنشأته مرة واحدة (انظر docs/STABLE-MCP-LINK.md)، مثل https://saudi-studio.اسمك.workers.dev — يتطلب حساب Cloudflare مجانيًا بلا بطاقة. اتركه فارغًا لرابط يتغير كل تشغيل.)
+#@markdown (اختياري — رابط MCP ثابت لا يتغير بين التشغيلات: ضع هنا رابط Worker المجاني الذي أنشأته مرة واحدة (انظر docs/STABLE-MCP-LINK.md)، مثل saudi-studio.اسمك.workers.dev (يبدأ بـ https) — يتطلب حساب Cloudflare مجانيًا بلا بطاقة. اتركه فارغًا لرابط يتغير كل تشغيل.)
 RUN_BENCHMARK = False  #@param {type:"boolean"}
 #@markdown (قياس السرعة الفعلية على هذا الجهاز: جملة، نص كامل، إعادة توليد جملة + دمج، مع جودة النتائج. يطبع JSON تنسخه وترسله. فعّله مع GPU T4: ‏«وقت التشغيل ← تغيير نوع وقت التشغيل ← T4».)
 ALLOW_UNVERIFIED_CLOUDFLARED = False  #@param {type:"boolean"}
