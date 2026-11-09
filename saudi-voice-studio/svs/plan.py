@@ -70,11 +70,16 @@ def recompute(plan: dict) -> dict:
     """Recompute computed prosody ('params') for every segment from emotion/intensity/controls/overrides."""
     plan["controls"] = delivery.clean_controls(plan.get("controls"))
     n = len(plan["segments"])
+    try:
+        bias = voices.get_voice(plan.get("voice")).get("emotion_bias") if plan.get("voice") else None
+    except Exception:
+        bias = None
     for i, s in enumerate(plan["segments"]):
         s["emotion"] = delivery.canon_emotion(s.get("emotion", "neutral"))
         s["intensity"] = delivery.clamp(float(s.get("intensity", 0.5)), 0.0, 1.0)
         s["params"] = delivery.compute(s, plan["controls"], plan.get("style", "narration"), index=i, total=n,
-                                       voice_style=plan.get("voice_style"), lock_identity=bool(plan.get("lock_identity")))
+                                       voice_style=plan.get("voice_style"), lock_identity=bool(plan.get("lock_identity")),
+                                       emotion_bias=bias)
     return plan
 
 

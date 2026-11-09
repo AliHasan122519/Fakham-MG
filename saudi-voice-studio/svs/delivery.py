@@ -27,6 +27,20 @@ EMOTIONS = {
     "warning":    ("التحذير", 1.02,  0.2,  2.0, 0.00, 0.45, 0, 0.9),
     "formal":     ("الرسمية", 0.98, -0.2,  0.0, 0.00, 0.45, 0, 0.6),
 }
+# What to RECORD for a real emotional timbre (the only way to get it with this model family): direction + sentence to read.
+# 5-10 s, one speaker (you), quiet dry room, same microphone distance as your base clip, natural — not shouted, not whispered.
+EMOTION_PROMPTS = {
+    "joy":        ("ابتسم وأنت تتكلم، بنبرة فرح صادقة وخفيفة", "يا لها من أخبار رائعة! لقد نجحنا أخيرًا، والفرحة تملأ قلوبنا جميعًا."),
+    "sadness":    ("بطيء وهادئ ونَفَس منخفض، كأنك تتألم بصمت", "رحل الجميع وبقيت وحدي، والصمت يملأ المكان، وما أثقل هذا الحنين."),
+    "excitement": ("حماس عالٍ وطاقة وسرعة، كمعلّق إعلاني (دون صراخ)", "لا تفوّتوا هذه الفرصة! العرض الأكبر هذا الموسم يبدأ الآن، وسيغيّر كل شيء!"),
+    "calm":       ("بطيء جدًا ومسترخٍ، بصوت دافئ منخفض", "خذ نفسًا عميقًا، واترك كل شيء خلفك، فالهدوء يبدأ من الداخل ببطء."),
+    "confidence": ("ثابت وواثق وبلا تردد، بإيقاع منتظم", "نحن نعرف ما نفعله، وخطّتنا واضحة، والنتائج ستتحدث عنا بثقة."),
+    "grandeur":   ("فخم ومهيب كراوي وثائقي، بطيء ومتمهّل مع عمق", "من هنا انطلقت الحضارات، وعلى هذه الأرض كُتب التاريخ بأحرف من نور."),
+    "empathy":    ("دافئ وحنون ومطمئن، بصوت قريب", "أفهم تمامًا ما تشعر به، وأنا هنا بجانبك، ولن أتركك وحدك."),
+    "suspense":   ("خافت وبطيء مع توقف قبل الكلمات المفاجئة", "وفجأة... توقّف كل شيء. سمعوا خطوات تقترب في الظلام، ولم يعرف أحد من القادم."),
+    "warning":    ("حازم وواضح وأعلى قليلًا، بلا غضب", "تنبيه! الطريق مغلق أمامكم، ابتعدوا فورًا ولا تقتربوا من المكان."),
+    "formal":     ("رسمي ومحايد كمذيع نشرة، دقيق المخارج", "تعلن الجهة المختصة عن بدء التسجيل ابتداءً من يوم الأحد القادم في جميع المناطق."),
+}
 ALIASES = {"enthusiastic": "excitement", "serious": "formal", "dramatic": "grandeur", "warm": "empathy"}
 
 STYLES = {
@@ -104,7 +118,7 @@ def _jitter(seed_text: str, amp: float) -> tuple[float, float]:
 
 
 def compute(seg: dict, controls: dict, style: str, *, index: int, total: int, voice_style: str | None = None,
-            lock_identity: bool = False) -> dict:
+            lock_identity: bool = False, emotion_bias: dict | None = None) -> dict:
     """Concrete parameters for one segment. `seg` needs: emotion, intensity, sentence_type, spoken/text,
     first_in_paragraph/last_in_paragraph, overrides{}. Returns dict with speed_mul, pitch_st, gain_db, pause_*."""
     c = clean_controls(controls)
@@ -116,7 +130,8 @@ def compute(seg: dict, controls: dict, style: str, *, index: int, total: int, vo
     emo = canon_emotion(seg.get("emotion", "neutral"))
     _n, e_speed, e_pitch, e_gain, e_pb, e_pa, e_nfe, e_var = EMOTIONS[emo]
     inten = clamp(float(seg.get("intensity", 0.5)), 0.0, 1.0)
-    k = inten * c["expressiveness"]                     # emotional depth
+    bias = float((emotion_bias or {}).get(emo, 1.0))     # each persona colours emotions differently (documentary: grandeur/suspense; promo: excitement…)
+    k = inten * c["expressiveness"] * clamp(bias, 0.3, 1.8)    # emotional depth
     speed = st[1] * (1 + (e_speed - 1) * k)
     pitch = e_pitch * k * c["tone_strength"]
     gain = e_gain * k * c["tone_strength"]

@@ -8,6 +8,8 @@ ENABLE_SMART_ENHANCEMENT = True  #@param {type:"boolean"}
 #@markdown ⚠️ ربط Drive يمنح بيئة التشغيل وصولًا لكل ملفات Drive لديك (Colab لا يسمح بربط مجلد واحد فقط). الكود يكتب داخل `saudi-voice-studio/` فقط، لكن إن كنت لا تريد هذا الوصول أزل العلامة (ستُعاد تنزيلات النماذج ~2.6GB كل جلسة ولا تُحفظ الشخصيات).
 ENABLE_EXPRESSIVE_ENGINE = False  #@param {type:"boolean"}
 #@markdown (اختياري — تجريبي: محرك Chatterbox المفتوح MIT بمفتاح تعبير حقيقي للفصحى فقط. يضيف بيئة منفصلة ~5GB + أوزان 3.3GB ووقت تثبيت أطول. اتركه معطّلًا في أول تشغيل.)
+RUN_BENCHMARK = False  #@param {type:"boolean"}
+#@markdown (قياس السرعة الفعلية على هذا الجهاز: جملة، نص كامل، إعادة توليد جملة + دمج، مع جودة النتائج. يطبع JSON تنسخه وترسله. فعّله مع GPU T4: ‏«وقت التشغيل ← تغيير نوع وقت التشغيل ← T4».)
 ALLOW_UNVERIFIED_CLOUDFLARED = False  #@param {type:"boolean"}
 #@markdown (اتركه معطّلًا: لا يُشغَّل cloudflared إلا إذا طابقت بصمته SHA-256 المثبّتة.)
 #@markdown (النموذج الثاني للهجات الحجازية/البيضاء/الخليجية، ~1.3GB إضافية على Drive. النجدية لا تحتاجه.)
@@ -221,6 +223,13 @@ def main():
         shutdown()
         raise SystemExit(1)
 
+    if RUN_BENCHMARK:
+        step(6, "قياس الأداء الفعلي (يستغرق دقائق)…")
+        try:
+            run([str(VPY), "scripts/benchmark.py"], "benchmark", env=env, cwd=APP)
+        except (SystemExit, Exception) as e:      # a failed benchmark must never stop the studio from starting
+            say(f"⚠️ فشل قياس الأداء ({e}); سأتابع تشغيل الاستوديو.")
+
     ui = f"{env['SVS_PUBLIC_URL']}/?token={token}"
     mcp_url = f"{env['SVS_PUBLIC_URL']}/mcp?token={token}"
     if public:
@@ -233,6 +242,25 @@ def main():
                 urllib.request.urlopen(f"{public}/api/health", timeout=15)
             except Exception:
                 public = None  # لا نعرض رابطًا لا يعمل
+
+    mcp_ok = None
+    if public:       # اختبار تكامل MCP الفعلي عبر الرابط العام (نفس الطريق الذي يسلكه موصل Claude)
+        def _rpc(method, params=None, i=1):
+            req = urllib.request.Request(
+                mcp_url, method="POST", data=json.dumps({"jsonrpc": "2.0", "id": i, "method": method, "params": params or {}}).encode(),
+                headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
+            raw = urllib.request.urlopen(req, timeout=30).read().decode()
+            if raw.lstrip().startswith("event:") or raw.lstrip().startswith("data:"):
+                raw = [l[5:].strip() for l in raw.splitlines() if l.startswith("data:")][-1]
+            return json.loads(raw)
+        try:
+            _rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "colab-selfcheck", "version": "1"}})
+            n = len(_rpc("tools/list", i=2)["result"]["tools"])
+            mcp_ok = n
+            say(f"✅ اختبار MCP عبر الرابط العام نجح: {n} أداة متاحة.")
+        except Exception as e:
+            mcp_ok = False
+            say(f"❌ اختبار MCP عبر الرابط العام فشل ({e}). الواجهة قد تعمل لكن موصل Claude لن يعمل (غالبًا 502). أعد تشغيل الخلية للحصول على رابط جديد.")
 
     say("\n" + "=" * 50)
     if not public:

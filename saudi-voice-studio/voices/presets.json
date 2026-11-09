@@ -88,7 +88,15 @@
       "style": "narration",
       "identity": "صوت رجالي عميق: مقطع مرجعي منخفض الطبقة (≈111Hz) + خفض هوية الصوت 2.2 نصف نغمة مع إزاحة الصيغ .",
       "derive_from_own": true,
-      "sample_text": "في قلب الصحراء، حيث يلتقي الرمل بالسماء، تُروى حكايات الأجداد."
+      "sample_text": "في قلب الصحراء، حيث يلتقي الرمل بالسماء، تُروى حكايات الأجداد.",
+      "emotion_bias": {
+        "grandeur": 1.25,
+        "calm": 1.15,
+        "sadness": 1.1,
+        "suspense": 1.1,
+        "excitement": 0.7,
+        "joy": 0.8
+      }
     },
     {
       "id": "promo_energetic",
@@ -110,7 +118,16 @@
       "style": "ad",
       "identity": "صوت رجالي مشرق: مقطع نجدي (≈150Hz) + رفع طفيف + حدّة وضغط ديناميكي أقوى + إيقاع أسرع.",
       "derive_from_own": true,
-      "sample_text": "اكتشف الآن العرض الأقوى، ولا تفوّت الفرصة!"
+      "sample_text": "اكتشف الآن العرض الأقوى، ولا تفوّت الفرصة!",
+      "emotion_bias": {
+        "excitement": 1.35,
+        "joy": 1.25,
+        "confidence": 1.2,
+        "warning": 1.1,
+        "sadness": 0.6,
+        "calm": 0.7,
+        "grandeur": 0.9
+      }
     },
     {
       "id": "anchor_formal",
@@ -132,7 +149,17 @@
       "style": "news",
       "identity": "نبرة نشرات: مقطع منخفض + رفع هوية 1.8 نغمة (أخف وأوضح من الراوي العميق) + ضغط متساوٍ وإيقاع ثابت قليل التقلب.",
       "derive_from_own": true,
-      "sample_text": "أعلنت الجهات المختصة اليوم عن بدء الحملة الوطنية الجديدة."
+      "sample_text": "أعلنت الجهات المختصة اليوم عن بدء الحملة الوطنية الجديدة.",
+      "emotion_bias": {
+        "formal": 1.1,
+        "confidence": 1.1,
+        "excitement": 0.5,
+        "joy": 0.55,
+        "sadness": 0.6,
+        "suspense": 0.6,
+        "empathy": 0.7,
+        "warning": 1.0
+      }
     },
     {
       "id": "narrator_female",
@@ -153,7 +180,15 @@
       "style": "story",
       "identity": "صوت نسائي: المقطع التجريبي ‘Gulf’ نطاق نغمته ≈302Hz (تقدير آلي لم يُتحقق منه بالأذن) — استبدله بمقطع نسائي تملك حقه.",
       "derive_from_own": true,
-      "sample_text": "مرحبًا بكم، يسعدني أن أروي لكم هذه الحكاية."
+      "sample_text": "مرحبًا بكم، يسعدني أن أروي لكم هذه الحكاية.",
+      "emotion_bias": {
+        "empathy": 1.3,
+        "joy": 1.15,
+        "calm": 1.15,
+        "sadness": 1.2,
+        "grandeur": 0.8,
+        "excitement": 0.9
+      }
     },
     {
       "id": "documentary_cinematic",
@@ -175,7 +210,16 @@
       "style": "documentary",
       "identity": "مهيب سينمائي: مقطع نجدي + خفض هوية 3.4 نصف نغمة + إيقاع بطيء ووقفات أطول.",
       "derive_from_own": true,
-      "sample_text": "عبر القرون، ظلّ هذا المكان شاهدًا على مجد لا يزول."
+      "sample_text": "عبر القرون، ظلّ هذا المكان شاهدًا على مجد لا يزول.",
+      "emotion_bias": {
+        "grandeur": 1.4,
+        "suspense": 1.35,
+        "calm": 1.15,
+        "sadness": 1.1,
+        "excitement": 0.6,
+        "joy": 0.7,
+        "warning": 0.9
+      }
     }
   ]
 }

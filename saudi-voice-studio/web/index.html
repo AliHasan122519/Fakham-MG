@@ -82,6 +82,7 @@ table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{padding:5px 4px
       <p class="note">المحرك لا يملك مفتاح مشاعر؛ <b>الجرس العاطفي الحقيقي يأتي من مقطع مرجعي بنفس العاطفة</b>. سجّل ٥–١٠ ثوانٍ بصوتك وأنت تتكلم بتلك العاطفة (حماس، حزن، هدوء، تشويق…). تُستخدم تلقائيًا للجمل ذات العاطفة نفسها.</p>
       <div id="hemolist" class="note"></div>
       <label for="hemosel">العاطفة</label><select id="hemosel"></select>
+      <div class="note" id="hemoprompt" style="border:1px dashed var(--mute);padding:8px;border-radius:8px"></div>
       <input type="file" id="hemofile" accept="audio/*,video/*">
       <label><input type="checkbox" id="hemoauth"> أقرّ أن الصوت صوتي أو أملك حق استخدامه</label>
       <button class="btn ghost sm" id="hemogo" type="button">حفظ مقطع العاطفة</button>
@@ -441,6 +442,8 @@ function emoInit(){
   const own=S.voices.find(v=>v.is_default&&v.reference_source==='own');
   $('#hemo').classList.toggle('hide',!own);if(!own)return;
   opt($('#hemosel'),Object.entries(S.meta.emotions).filter(([k])=>k!=='neutral').map(([k,x])=>[k,x.name_ar]));
+  const showPrompt=()=>{const p=(S.meta.emotion_prompts||{})[$('#hemosel').value];$('#hemoprompt').innerHTML=p?`<b>كيف تسجّل:</b> ${esc(p.direction)}<br><b>اقرأ حرفيًا:</b> «${esc(p.text)}»`:''};
+  $('#hemosel').onchange=showPrompt;showPrompt();
   const have=own.emotion_refs||[];
   $('#hemolist').textContent=have.length?'المحفوظ: '+have.map(k=>(S.meta.emotions[k]||{}).name_ar||k).join('، '):'لا توجد مقاطع عاطفية بعد.';
   $('#hemogo').onclick=async()=>{const m=$('#hemomsg');m.textContent='';const f=$('#hemofile').files[0];

@@ -1,7 +1,7 @@
 """Saudi Voice Studio — free, open-source Saudi Arabic voice-over studio."""
 import os
 
-__version__ = "1.0.0"
+__version__ = "1.0.0-rc.2"
 
 # The server is headless. Notebook environments (Colab/Jupyter) export
 # MPLBACKEND=module://matplotlib_inline.backend_inline, which only exists inside an IPython kernel;

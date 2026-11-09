@@ -236,7 +236,8 @@ def api_meta():
     return {"emotions": {k: {"name_ar": v[0]} for k, v in delivery.EMOTIONS.items()},
             "styles": {k: {"name_ar": v[0]} for k, v in delivery.STYLES.items()},
             "controls": delivery.DEFAULT_CONTROLS, "limits": delivery.LIMITS,
-            "override_limits": delivery.OVERRIDE_LIMITS}
+            "override_limits": delivery.OVERRIDE_LIMITS,
+            "emotion_prompts": {k: {"direction": v[0], "text": v[1]} for k, v in delivery.EMOTION_PROMPTS.items()}}
 
 
 @app.post("/api/generate", dependencies=[Depends(auth)])

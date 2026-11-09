@@ -362,8 +362,10 @@ def build_http_app():
 
     from .web import app as web_app
 
+    # stateless + plain JSON responses: no server-side session to lose (restart, proxy that drops the mcp-session-id header)
+    # and no long-lived SSE stream through tunnels/proxies — what cloud MCP connectors handle most reliably.
     app = mcp.streamable_http_app(host="0.0.0.0" if config.HOST == "0.0.0.0" else config.HOST,
-                                  transport_security=_transport_security())
+                                  transport_security=_transport_security(), stateless_http=True, json_response=True)
     app.router.routes.append(Mount("/", app=web_app))
 
     class TokenGuard(BaseHTTPMiddleware):
@@ -379,7 +381,18 @@ def build_http_app():
             return await call_next(request)
 
     app.add_middleware(TokenGuard)
-    return app
+
+    class SlashAlias:
+        """Connectors often normalise the URL to /mcp/ — accept both (Starlette would otherwise answer 404/307)."""
+        def __init__(self, inner):
+            self.inner = inner
+
+        async def __call__(self, scope, receive, send):
+            if scope["type"] == "http" and scope["path"] == "/mcp/":
+                scope = dict(scope, path="/mcp", raw_path=b"/mcp")
+            await self.inner(scope, receive, send)
+
+    return SlashAlias(app)
 
 
 def _transport_security():

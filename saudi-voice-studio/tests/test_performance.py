@@ -303,3 +303,37 @@ def test_take_has_qc_report_pace_harmonisation_and_24bit_wav():
     br = int(_j.loads(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=bit_rate", "-of", "json", str(d / "master.mp3")],
                                      capture_output=True, text=True).stdout)["format"]["bit_rate"])
     assert br >= 300000
+
+
+def test_personas_colour_emotions_differently():
+    """Same sentence + same emotion + same intensity: each persona must deliver it differently (not just a speed change)."""
+    txt = "ارتفع الغبار حتى حجب السماء وضاع الطريق."
+    out = {}
+    for vid in ("documentary_cinematic", "promo_energetic", "anchor_formal", "narrator_deep", "narrator_female"):
+        p = planmod.build(txt, voice=vid, emotion="excitement")
+        seg = p["segments"][0]
+        seg["emotion"], seg["intensity"] = "excitement", 0.9
+        p = planmod.recompute(p)
+        out[vid] = p["segments"][0]["params"]
+    # promo gets the strongest excitement, anchor/documentary the most restrained
+    assert out["promo_energetic"]["gain_db"] > out["narrator_deep"]["gain_db"] > out["anchor_formal"]["gain_db"]
+    assert out["promo_energetic"]["gain_db"] > out["documentary_cinematic"]["gain_db"]
+    rates = {k: round(v["speed_mul"], 3) for k, v in out.items()}
+    assert len(set(rates.values())) >= 4, rates
+    # grandeur is the documentary persona's signature
+    g = {}
+    for vid in ("documentary_cinematic", "promo_energetic"):
+        p = planmod.build(txt, voice=vid)
+        p["segments"][0]["emotion"], p["segments"][0]["intensity"] = "grandeur", 0.9
+        from svs import voices as _v
+        g[vid] = planmod.recompute(p)["segments"][0]["params"]["speed_mul"] * _v.get_voice(vid)["speed"]   # effective speed
+    assert g["documentary_cinematic"] < g["promo_energetic"]
+
+
+def test_every_emotion_has_a_recording_prompt():
+    from svs import delivery
+    for k in delivery.EMOTIONS:
+        if k == "neutral":
+            continue
+        d, t = delivery.EMOTION_PROMPTS[k]
+        assert d and len(t.split()) >= 8, k                      # a sentence long enough for a 5-10 s clip
