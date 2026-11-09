@@ -43,6 +43,7 @@ class Engine:
             info["torch"] = torch.__version__
             info["threads"] = torch.get_num_threads()
             info["bf16_autocast"] = self._cpu_bf16()
+            info["onednn_primitive_cache"] = os.environ.get("ONEDNN_PRIMITIVE_CACHE_CAPACITY")
         except Exception as e:  # torch missing
             info["error"] = f"torch غير مثبت: {e}"
         try:

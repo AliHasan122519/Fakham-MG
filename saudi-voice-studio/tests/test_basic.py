@@ -82,3 +82,12 @@ def test_clone_requires_rights():
     from svs import mcp_server
     r = mcp_server.clone_voice("x1", "س", "نص", False, audio_base64="AAAA")
     assert "error" in r
+
+
+def test_onednn_cache_is_capped_before_torch_import():
+    """Regression for the measured bf16 memory growth: the cap must be set by the package itself, in a fresh process, before torch loads."""
+    import subprocess, sys
+    code = ("import os,sys; os.environ.pop('ONEDNN_PRIMITIVE_CACHE_CAPACITY',None); import svs; "
+            "assert os.environ['ONEDNN_PRIMITIVE_CACHE_CAPACITY']=='8'; assert 'torch' not in sys.modules; print('ok')")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=str(__import__('pathlib').Path(__file__).resolve().parents[1]))
+    assert r.returncode == 0 and "ok" in r.stdout, r.stderr

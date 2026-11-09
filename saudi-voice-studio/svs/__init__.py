@@ -9,3 +9,9 @@ __version__ = "1.0.0-rc.2"
 # would crash with "Key backend: ... is not a valid value for backend". Force a non-interactive backend
 # BEFORE anything can import matplotlib. Unconditional on purpose: the inherited value is the bug.
 os.environ["MPLBACKEND"] = "Agg"
+
+# Memory: with bf16 autocast on CPU, oneDNN JIT-compiles and CACHES a kernel set for every new tensor shape (each sentence has a
+# different length). Measured on the real engine: RSS grew ~0.2 GB per sentence without limit (2.9 -> 4.3 GB in 7 sentences);
+# fp32 stayed flat (2.41 GB over 8 sentences). Capping the primitive cache bounds it (plateau ~3.1 GB) at no measurable speed cost.
+# Must be set before torch is imported; a user-provided value always wins.
+os.environ.setdefault("ONEDNN_PRIMITIVE_CACHE_CAPACITY", "8")
