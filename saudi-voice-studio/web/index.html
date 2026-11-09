@@ -77,6 +77,7 @@ table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{padding:5px 4px
       <label for="hdialect">اللهجة</label><select id="hdialect"></select>
       <label><input id="hmax" type="checkbox"> جودة قصوى (أبطأ: يجرّب عدة نسخ ويختار الأقرب لصوتك)</label>
       <label><input id="hreview" type="checkbox"> أريد مراجعة الخطة قبل التوليد</label>
+      <label><input id="hdraft" type="checkbox"> مسودة سريعة للمعاينة (بلا إصلاح تلقائي — للتسليم النهائي أزلها)</label>
     </details>
     <details id="hemo"><summary>🎭 مشاعر حقيقية: أضف مقطعًا بصوتك لكل عاطفة (اختياري)</summary>
       <p class="note">المحرك لا يملك مفتاح مشاعر؛ <b>الجرس العاطفي الحقيقي يأتي من مقطع مرجعي بنفس العاطفة</b>. سجّل ٥–١٠ ثوانٍ بصوتك وأنت تتكلم بتلك العاطفة (حماس، حزن، هدوء، تشويق…). تُستخدم تلقائيًا للجمل ذات العاطفة نفسها.</p>
@@ -500,7 +501,7 @@ $('#obuse').onclick=async()=>{$('#oberr').textContent='';
 $('#hgo').onclick=async()=>{$('#herr').textContent='';$('#hres').classList.add('hide');const text=$('#htext').value.trim();
   if(!text){$('#herr').textContent='اكتب نصًا أولًا.';return}
   $('#hgo').disabled=true;$('#hbar').classList.remove('hide');$('#hbarf').style.width='3%';$('#hmsg').textContent='⏳ أبدأ…';
-  try{const body={text,voice:S.sel||null,dialect:$('#hdialect').value||null,max_quality:$('#hmax').checked,review:$('#hreview').checked,style:$('#hstyle').value||null,controls:proControls()};
+  try{const body={text,voice:S.sel||null,dialect:$('#hdialect').value||null,max_quality:$('#hmax').checked,review:$('#hreview').checked,draft:$('#hdraft').checked,style:$('#hstyle').value||null,controls:proControls()};
     const r=await jpost('/api/auto',body);
     if(r.segments){S.plan=r;S.take=null;renderPlan();showAdv();tab('plan');return}
     for(;;){await new Promise(x=>setTimeout(x,1500));const j=await api('/api/jobs/'+r.job);$('#hbarf').style.width=Math.max(3,j.progress*100)+'%';$('#hmsg').textContent='⏳ '+(j.message||'');

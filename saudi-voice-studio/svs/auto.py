@@ -17,7 +17,7 @@ GENRE_NARRATOR = {"ad": "promo_energetic", "news": "anchor_formal", "announcemen
 
 def run(text: str = "", *, voice: str | None = None, dialect: str | None = None, max_quality: bool = False,
         progress: Callable[[float, str], None] | None = None, plan: dict | None = None,
-        style: str | None = None, controls: dict | None = None) -> dict:
+        style: str | None = None, controls: dict | None = None, draft: bool = False) -> dict:
     progress = progress or (lambda p, m: None)
     voice = voice or voices.default_voice_id()
     if voice == "auto":                    # pick the narrator from the detected type of text
@@ -34,4 +34,4 @@ def run(text: str = "", *, voice: str | None = None, dialect: str | None = None,
     cand = render.default_candidates()
     if max_quality:
         cand = max(cand, 3)
-    return render.render(plan, progress=progress, candidates=cand)
+    return render.render(plan, progress=progress, candidates=1 if draft else cand, draft=draft)

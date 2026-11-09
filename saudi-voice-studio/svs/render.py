@@ -154,7 +154,9 @@ def _assemble(clips: list[np.ndarray], pauses: list[tuple[float, float]], sr: in
 
 def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str], None] | None = None,
            synth_fn=default_synth, parent: str | None = None, clean: bool = False, compare_raw: bool | None = None,
-           candidates: int | None = None) -> dict:
+           candidates: int | None = None, draft: bool = False) -> dict:
+    """draft=True: fast preview — no verification-gated second synthesis and no automatic re-rolls (QC still measures and
+    reports). Same voice, same model, same processing; only the repair work is skipped."""
     progress = progress or (lambda p, m: None)
     t0 = time.time()
     plan = planmod.validate(plan_in)
@@ -243,7 +245,7 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
         wave, sim = wave_for(s["spoken"], ref, ref_text, speed, nfe, s["seed"], verify=True, label=f"الجملة {i + 1}",
                              frac=0.04 + 0.78 / n_pass * i / len(segs), exag=exag, cfg_w=cfg_w)
         diac_note = None
-        if (sim is not None and engine != "expressive" and s.get("vocalized") and s.get("corrected")
+        if (not draft and sim is not None and engine != "expressive" and s.get("vocalized") and s.get("corrected")
                 and s["spoken"] == s["vocalized"] and s["vocalized"] != s["corrected"]):
             # Verification-gated diacritics: measured on real generations, a diacritised word can make the model slower or
             # less clear (e.g. «ذَهَبَ» → ASR 0.81-0.93 vs plain 0.97-1.0). Synthesize the plain text too and keep the
@@ -295,11 +297,14 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
     flagged = [i for i in range(len(segs)) if (i in word_chk and _bad(word_chk[i])) or
                (med_spk is not None and spk.get(i) is not None and spk[i] < med_spk - 0.18 and len(enh_waves[i]) >= 1.5 * audio.SR and len(segs) >= 3) or
                (med_f0 is not None and f0_raw.get(i) is not None and abs(f0_raw[i] - med_f0) > 2.0)]
+    if draft:
+        flagged = []
     for i in flagged:
         c0 = seg_ctx[i]
         best_w, best_c, best_spk = enh_waves[i], word_chk.get(i), spk.get(i)
         best_sc = (_score(best_c, best_spk) if best_c else (best_spk or 0)) - _f0pen(best_w)
-        for k in (1, 2):
+        hard = i in word_chk and _bad(word_chk[i])         # wrong/missing words deserve 2 re-rolls; a pitch/identity outlier 1
+        for k in ((1, 2) if hard else (1,)):
             progress(0.82, f"إصلاح الجملة {i + 1} (محاولة {k})")
             w2, _ = wave_for(c0["spoken"], c0["ref"], c0["ref_text"], c0["speed"], c0["nfe"],
                              (int(segs[i]["seed"]) + 15485863 * k) & 0x7FFFFFFF, verify=False, label="", frac=0.82,
@@ -534,7 +539,7 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
         add("tone", "ثبات جرس الصوت بين الجمل", "skipped", "الجمل قصيرة أو قليلة")
     st_all = "fail" if any(c["status"] == "fail" for c in checks) else ("warn" if any(c["status"] == "warn" for c in checks) else "ok")
     qc_report = {"status": st_all, "checks": checks, "fixed_sentences": qc_notes["fixed"], "unresolved_sentences": qc_notes["unresolved"],
-                 "rate_cv": {"before": cv_before, "after": cv_after}, "timbre": timbre}
+                 "rate_cv": {"before": cv_before, "after": cv_after}, "timbre": timbre, "draft": bool(draft)}
     took = time.time() - t0
     secs = m_master["duration_s"]
     if intel and all(v < 0.3 for v in intel.values()) and len(intel) == len(segs):

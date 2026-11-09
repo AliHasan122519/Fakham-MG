@@ -101,12 +101,13 @@ def smart_enhance(text: str, voice: str = "narrator_deep", dialect: str = "", st
 def generate_voiceover(text: str = "", voice: str = "", dialect: str = "", emotion: str = "auto",
                        style: str = "", speed: float = 0.0, expressiveness: float = 1.0, tone_strength: float = 1.0,
                        pause: float = 1.0, formality: float = 0.5, plan_json: str = "", wait_seconds: int = 45,
-                       controls_json: str = "") -> dict:
+                       controls_json: str = "", draft: bool = False) -> dict:
     """ولّد تعليقًا صوتيًا بأداء ذكي. emotion='auto' (اكتشاف تلقائي لكل جملة) أو مفتاح ثابت لكل الجمل:
     neutral|joy|sadness|excitement|calm|confidence|grandeur|empathy|suspense|warning|formal.
     style: narration|ad|news|documentary|story|conversation (فارغ = تلقائي). plan_json: خطة معدّلة من analyze_text.
     voice فارغ = صوتك الافتراضي (المقطع الذي رفعتَه). مع emotion='auto' ودون plan_json يعمل المسار التلقائي الكامل
     (تحليل المعنى + نطق + مشاعر + أداء + اختيار أقرب نسخة لصوتك). يعيد روابط MP3/WAV، وإلا job id لاستعلام get_job.
+    draft=true: مسودة سريعة للمعاينة (بلا إصلاح تلقائي)؛ للتسليم النهائي اتركه false.
     controls_json (اختياري): JSON بمفاتيح الاستوديو الاحترافي — stability 0..1 (ثبات الإيقاع)، energy -1..1 (هدوء↔حماس)،
     clarity 0..1 (وضوح المخارج)، warmth_db -3..3 (عمق/دفء)، variation 0..1.5 (واقعية/تنويع)، reverb 0..1 (صدى؛ صفر = جاف وهو الافتراضي،
     لا تضفه إلا بطلب صريح من المستخدم)، denoise true/false. المفاتيح غير المذكورة تبقى تلقائية. النتيجة تتضمن qc (فحص الجودة التلقائي)."""
@@ -134,7 +135,7 @@ def generate_voiceover(text: str = "", voice: str = "", dialect: str = "", emoti
     voice = voice or voices.default_voice_id()
     if plan is None and emotion in ("auto", "") and not speed:
         jid = jobs.start(lambda progress=None, **kw: auto.run(progress=progress, **kw), text=text, voice=voice,
-                         dialect=dialect or None, style=style or None, controls=controls)
+                         dialect=dialect or None, style=style or None, controls=controls, draft=draft)
         return _job_view(jobs.wait(jid, max(0, min(wait_seconds, 110))))
     jid = jobs.start(text=text, voice_id=voice, dialect=dialect or None, emotion=emotion, speed=speed or None,
                      plan=plan, style=style or None, controls=controls)

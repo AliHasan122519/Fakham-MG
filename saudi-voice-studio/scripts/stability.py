@@ -33,7 +33,7 @@ def main() -> int:
     import numpy as np
     import psutil
 
-    from svs import auto, config, render, voices
+    from svs import auto, config, render, studio, voices
 
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 6
     proc = psutil.Process()
@@ -44,9 +44,9 @@ def main() -> int:
         t0 = time.time()
         ok, err, take = True, None, None
         try:
-            take = auto.run(txt, voice=voice)
+            take = studio.take_view(auto.run(txt, voice=voice))
             if i % 2 == 1:                                   # also exercise regeneration + merge
-                take = render.regenerate(take["id"], take["segments"][1]["id"], new_seed=True)
+                take = studio.take_view(render.regenerate(take["id"], take["segments"][1]["id"], new_seed=True))
         except Exception as e:                               # a crash is a failed run, reported — not hidden
             ok, err = False, f"{type(e).__name__}: {e}"
         dt = time.time() - t0

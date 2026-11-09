@@ -145,6 +145,7 @@ class AutoReq(BaseModel):
     review: bool = False
     style: str | None = None
     controls: dict | None = None          # only the keys the user touched; everything else stays automatic
+    draft: bool = False                   # fast preview: skip automatic repairs/re-rolls
 
 
 @app.post("/api/auto", dependencies=[Depends(auth)])
@@ -168,7 +169,7 @@ def api_auto(req: AutoReq):
         raise HTTPException(400, str(e))
     return {"job": jobs.start(lambda progress=None, **kw: auto.run(progress=progress, **kw),
                               text=req.text, voice=voice, dialect=req.dialect, max_quality=req.max_quality,
-                              style=req.style or None, controls=req.controls)}
+                              style=req.style or None, controls=req.controls, draft=req.draft)}
 
 
 @app.post("/api/voices/{voice_id}/sample", dependencies=[Depends(auth)])
