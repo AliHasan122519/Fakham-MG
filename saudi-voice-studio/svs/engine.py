@@ -42,6 +42,7 @@ class Engine:
             info["device"] = self.device if self._models else self.pick_device()
             info["torch"] = torch.__version__
             info["threads"] = torch.get_num_threads()
+            info["bf16_autocast"] = self._cpu_bf16()
         except Exception as e:  # torch missing
             info["error"] = f"torch غير مثبت: {e}"
         try:
@@ -95,6 +96,19 @@ class Engine:
             self._vocoder = load_vocoder(device=self.device)
         return model
 
+    def _cpu_bf16(self) -> bool:
+        """bf16 autocast on CPU only when the CPU has native bf16 (AVX512-BF16 / AMX); otherwise it would be slower."""
+        mode = str(config.BF16).lower()
+        if mode in ("0", "off", "false") or self.pick_device() != "cpu":
+            return False
+        if mode in ("1", "on", "true"):
+            return True
+        try:
+            flags = Path("/proc/cpuinfo").read_text(errors="ignore")
+            return "avx512_bf16" in flags or "amx_bf16" in flags
+        except Exception:
+            return False
+
     # ---- synthesis ---------------------------------------------------
     def synth(self, text: str, ref_audio: str, ref_text: str, *, engine: str = "najdi",
               speed: float = 1.0, nfe_step: int = 32, seed: int | None = None) -> tuple[np.ndarray, int]:
@@ -109,8 +123,12 @@ class Engine:
                 import torch
                 torch.manual_seed(seed)
             ref_a, ref_t = preprocess_ref_audio_text(ref_audio, ref_text)
-            wave, sr, _ = infer_process(ref_a, ref_t, text, model, self._vocoder,
-                                        nfe_step=int(nfe_step), speed=float(speed))
+            import contextlib
+            import torch
+            ctx = torch.autocast("cpu", dtype=torch.bfloat16) if self._cpu_bf16() else contextlib.nullcontext()
+            with ctx:
+                wave, sr, _ = infer_process(ref_a, ref_t, text, model, self._vocoder,
+                                            nfe_step=int(nfe_step), speed=float(speed))
             return np.asarray(wave, dtype=np.float32), int(sr)
 
 

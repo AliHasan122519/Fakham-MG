@@ -169,6 +169,15 @@ def reference_for(v: dict, dialect: str, emotion: str | None = None) -> tuple[Pa
         wav, txt = config.USER_REFS / f"{vid}.{emotion}.wav", config.USER_REFS / f"{vid}.{emotion}.txt"
         if wav.is_file() and txt.is_file():
             return wav, txt.read_text(encoding="utf-8").strip(), "own-emotion"
+    if emotion and emotion != "neutral" and v.get("derive_from_own"):      # derived narrators inherit YOUR emotion-specific clips
+        try:
+            dv = default_voice_id()
+            if dv != "narrator_deep" and own_base(v.get("gender")):
+                wav, txt = config.USER_REFS / f"{dv}.{emotion}.wav", config.USER_REFS / f"{dv}.{emotion}.txt"
+                if wav.is_file() and txt.is_file():
+                    return wav, txt.read_text(encoding="utf-8").strip(), "own-emotion"
+        except Exception:
+            pass
     if v.get("_ref_path") and v.get("_ref_text"):
         return v["_ref_path"], v["_ref_text"], "own"
     if v.get("derive_from_own"):          # narrators are built on YOUR voice (high-fidelity clip) when its gender matches

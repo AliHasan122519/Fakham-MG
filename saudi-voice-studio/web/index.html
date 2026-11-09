@@ -78,6 +78,15 @@ table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{padding:5px 4px
       <label><input id="hmax" type="checkbox"> جودة قصوى (أبطأ: يجرّب عدة نسخ ويختار الأقرب لصوتك)</label>
       <label><input id="hreview" type="checkbox"> أريد مراجعة الخطة قبل التوليد</label>
     </details>
+    <details id="hemo"><summary>🎭 مشاعر حقيقية: أضف مقطعًا بصوتك لكل عاطفة (اختياري)</summary>
+      <p class="note">المحرك لا يملك مفتاح مشاعر؛ <b>الجرس العاطفي الحقيقي يأتي من مقطع مرجعي بنفس العاطفة</b>. سجّل ٥–١٠ ثوانٍ بصوتك وأنت تتكلم بتلك العاطفة (حماس، حزن، هدوء، تشويق…). تُستخدم تلقائيًا للجمل ذات العاطفة نفسها.</p>
+      <div id="hemolist" class="note"></div>
+      <label for="hemosel">العاطفة</label><select id="hemosel"></select>
+      <input type="file" id="hemofile" accept="audio/*,video/*">
+      <label><input type="checkbox" id="hemoauth"> أقرّ أن الصوت صوتي أو أملك حق استخدامه</label>
+      <button class="btn ghost sm" id="hemogo" type="button">حفظ مقطع العاطفة</button>
+      <div class="note" id="hemomsg"></div>
+    </details>
     <details id="hpro"><summary>🎚 إعدادات الاستوديو (كلها «تلقائي» حتى تحرّكها)</summary>
       <p class="note">الوضع التلقائي يختار القيم المناسبة لنوع النص. حرّك أي منزلق ليصبح يدويًا؛ الباقي يبقى تلقائيًا. الصوت <b>جاف ونظيف</b> افتراضيًا — لا صدى إلا إن طلبته.</p>
       <label for="hstyle">الأسلوب</label><select id="hstyle"></select>
@@ -428,6 +437,21 @@ function proInit(){
   $('#hsliders').innerHTML=PRO.map(([k,n,lo,hi,st])=>`<label>${n}: <b id="hpv_${k}">تلقائي</b></label><input type="range" id="hp_${k}" min="${lo}" max="${hi}" step="${st}" value="${d[k]??lo}">`).join('');
   PRO.forEach(([k])=>{const el=$('#hp_'+k);el.oninput=()=>{PROT.add(k);$('#hpv_'+k).textContent=(+el.value).toFixed(2)}});
   $('#hreset').onclick=()=>{PROT.clear();PRO.forEach(([k])=>{$('#hpv_'+k).textContent='تلقائي';$('#hp_'+k).value=(S.meta.controls||{})[k]??$('#hp_'+k).min});$('#hdenoise').checked=false;$('#hstyle').value=''}}
+function emoInit(){
+  const own=S.voices.find(v=>v.is_default&&v.reference_source==='own');
+  $('#hemo').classList.toggle('hide',!own);if(!own)return;
+  opt($('#hemosel'),Object.entries(S.meta.emotions).filter(([k])=>k!=='neutral').map(([k,x])=>[k,x.name_ar]));
+  const have=own.emotion_refs||[];
+  $('#hemolist').textContent=have.length?'المحفوظ: '+have.map(k=>(S.meta.emotions[k]||{}).name_ar||k).join('، '):'لا توجد مقاطع عاطفية بعد.';
+  $('#hemogo').onclick=async()=>{const m=$('#hemomsg');m.textContent='';const f=$('#hemofile').files[0];
+    try{if(!f)throw new Error('اختر ملفًا صوتيًا.');if(!$('#hemoauth').checked)throw new Error('يجب الإقرار بحق استخدام الصوت.');
+      m.textContent='⏳ أفحص المقطع وأفرّغه…';const fd=new FormData();fd.append('ref',f);fd.append('ref_text','');
+      const a=await api('/api/reference/analyze',{method:'POST',body:fd});
+      if(a.verdict.status==='reject'||!a.preview_id)throw new Error((a.verdict.messages||[]).join(' ')||'المقطع مرفوض.');
+      if(!a.transcript)throw new Error('لم أستطع تفريغ المقطع.');
+      await jpost('/api/voices/'+own.id+'/reference/commit',{preview_id:a.preview_id,ref_text:a.transcript,emotion:$('#hemosel').value});
+      m.textContent='✔ حُفظ. سمعتُ: «'+a.transcript+'»  (راجعه؛ إن أخطأ التفريغ أعد التسجيل بوضوح).';await load();proInit();homeInit();emoInit()}
+    catch(e){m.textContent='';$('#herr').textContent=e.message}}}
 function proControls(){const o={};PROT.forEach(k=>o[k]=+$('#hp_'+k).value);if($('#hdenoise').checked)o.denoise=true;return o}
 const QCI={ok:'✔',fixed:'🔧',warn:'⚠',fail:'✖',skipped:'—'};
 function renderQC(qc){
@@ -486,7 +510,7 @@ $('#hgo').onclick=async()=>{$('#herr').textContent='';$('#hres').classList.add('
         renderQC(t.qc);$('#hbarf').style.width='100%';$('#hmsg').textContent='تم ✔';break}}
   }catch(e){$('#herr').textContent=e.message}finally{$('#hgo').disabled=false}};
 $('#hregen').onclick=()=>$('#hgo').click();
-load().then(()=>{proInit();homeInit()}).catch(e=>{$('#herr').textContent=e.message});
+load().then(()=>{proInit();homeInit();emoInit()}).catch(e=>{$('#herr').textContent=e.message});
 </script>
 </body>
 </html>

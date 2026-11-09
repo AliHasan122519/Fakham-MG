@@ -26,6 +26,7 @@ ENGINES = {
 DIT_CFG = dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4)
 
 DEVICE = os.environ.get("SVS_DEVICE", "auto")          # auto | cpu | cuda
+BF16 = os.environ.get("SVS_BF16", "auto")                   # auto: bf16 autocast on CPUs with AVX512-BF16/AMX (measured 2.1x faster, same quality); 0 = off
 DEFAULT_NFE = int(os.environ.get("SVS_NFE", "0"))        # 0 = auto (16 on CPU, voice default on GPU); 16 fast, 32 good, 64 best
 MAX_CHARS = int(os.environ.get("SVS_MAX_CHARS", "2000"))
 

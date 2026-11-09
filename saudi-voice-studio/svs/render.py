@@ -501,6 +501,18 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
             f"تفاوت تشابه البصمة بين الجمل {spread:.2f} (الحد 0.25)" + (f" · أُعيدت: {', '.join(qc_notes['fixed'])}" if qc_notes["fixed"] else ""))
     else:
         add("identity", "ثبات هوية الراوي بين الجمل", "skipped", "نموذج البصمة غير متاح أو الجمل قصيرة")
+    # processing transparency: the master must still be the same voice as the unprocessed mix (no identity/tone damage)
+    try:
+        mi, _ = sf.read(str(d / "mix_in.wav"), dtype="float32")
+        mi = mi if mi.ndim == 1 else mi[:, 0]
+        n_ = min(len(mi), len(mw))
+        td = _cleanup._tonal_distance(mi[:n_], mw[:n_])
+        sp_pm = speaker.similarity(refaudio.audio_resample16(mi[:n_ ][: 24000 * 20]), refaudio.audio_resample16(mw[:n_][: 24000 * 20])) if speaker.available() else None
+        ok_pm = td <= 3.0 and (sp_pm is None or sp_pm >= 0.9)
+        add("mastering", "المعالجة لم تغيّر طبيعة الصوت", "ok" if ok_pm else "warn",
+            f"فرق الطيف قبل/بعد الماستر {td:.2f} dB (الحد 3.0)" + (f" · تطابق البصمة {sp_pm:.2f} (الحد 0.90)" if sp_pm is not None else ""))
+    except Exception:
+        add("mastering", "المعالجة لم تغيّر طبيعة الصوت", "skipped", "تعذّر القياس")
     if timbre["f0_spread_before"] is not None:
         fa = timbre["f0_spread_after"] if timbre["f0_spread_after"] is not None else timbre["f0_spread_before"]
         add("pitch", "ثبات طبقة الصوت بين الجمل", "ok" if fa <= 1.0 else "warn",

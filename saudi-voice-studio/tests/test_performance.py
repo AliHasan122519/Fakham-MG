@@ -295,7 +295,7 @@ def test_take_has_qc_report_pace_harmonisation_and_24bit_wav():
     rate = next(c for c in q["checks"] if c["id"] == "rate")
     assert rate["before"] > 0.05 and rate["after"] < rate["before"] * 0.5, rate
     ids = {c["id"] for c in q["checks"]}
-    assert {"clipping", "noise", "reverb", "level", "rate", "pauses", "words", "identity"} <= ids
+    assert {"clipping", "noise", "reverb", "level", "rate", "pauses", "words", "identity", "mastering", "pitch", "tone"} <= ids
     assert next(c for c in q["checks"] if c["id"] == "clipping")["status"] == "ok"
     d = render.TAKES / take["id"]
     assert sf.info(str(d / "master.wav")).subtype == "PCM_24"

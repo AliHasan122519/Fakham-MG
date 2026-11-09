@@ -301,6 +301,23 @@ def test_narrators_derive_from_own_voice_and_no_recursion():
     assert {v["reference_source"] for v in voices.list_voices() if v["builtin"]} == {"demo"}
 
 
+def test_derived_narrators_use_your_emotion_clips():
+    """Real emotional timbre = your own emotional reference clip; derived narrators must inherit it (and only for that emotion)."""
+    from svs import voices
+    res = refaudio.analyze_upload(ASSETS / "Najdi.wav", TEXT["Najdi.wav"], use_asr=False)
+    voices.create_voice("my_voice", "صوتي")
+    refaudio.commit("my_voice", res["preview_id"], res["transcript"])
+    res2 = refaudio.analyze_upload(ASSETS / "Najdi.wav", TEXT["Najdi.wav"], use_asr=False)
+    refaudio.commit("my_voice", res2["preview_id"], res2["transcript"], "excitement")
+    try:
+        n = voices.get_voice("promo_energetic")
+        assert voices.reference_for(n, "najdi", "excitement")[2] == "own-emotion"
+        assert voices.reference_for(n, "najdi", "sadness")[2] == "derived"          # no clip for this emotion → base clip
+        assert voices.reference_for(n, "najdi", None)[2] == "derived"
+    finally:
+        voices.delete_voice("my_voice")
+
+
 def test_sample_endpoint_auth_cache_and_name_guards():
     from fastapi.testclient import TestClient
     from svs import web
