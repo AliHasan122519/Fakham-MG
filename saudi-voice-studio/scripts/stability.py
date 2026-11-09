@@ -51,7 +51,7 @@ def main() -> int:
             ok, err = False, f"{type(e).__name__}: {e}"
         dt = time.time() - t0
         row = {"run": i + 1, "ok": ok, "error": err, "seconds": round(dt, 1), "ram_gb": round(proc.memory_info().rss / 2 ** 30, 2),
-               "threads": proc.num_threads(), "open_files": len(proc.open_files()),
+               "threads": proc.num_threads(), "open_files": len(proc.open_files()), "open_paths": sorted({f.path for f in proc.open_files()})[-10:],
                "audio_s": None if take is None else take.get("seconds"),
                "qc": None if take is None else (take.get("qc") or {}).get("status"),
                "asr_min": None if take is None else (min((take.get("intelligibility") or {"x": 1}).values())),

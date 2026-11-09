@@ -91,3 +91,19 @@ def test_onednn_cache_is_capped_before_torch_import():
             "assert os.environ['ONEDNN_PRIMITIVE_CACHE_CAPACITY']=='8'; assert 'torch' not in sys.modules; print('ok')")
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=str(__import__('pathlib').Path(__file__).resolve().parents[1]))
     assert r.returncode == 0 and "ok" in r.stdout, r.stderr
+
+
+def test_history_does_not_leak_file_handles():
+    import os
+    from svs import history
+    def n_fds():
+        return len(os.listdir("/proc/self/fd"))
+    history.add({"id": "h0", "voice": "v", "dialect": "d", "emotion": "e", "speed": 1.0, "text": "t", "seconds": 1.0, "took": 1.0,
+                 "device": "cpu", "engine": "najdi"})
+    before = n_fds()
+    for i in range(60):
+        history.add({"id": f"h{i}", "voice": "v", "dialect": "d", "emotion": "e", "speed": 1.0, "text": "t", "seconds": 1.0, "took": 1.0,
+                     "device": "cpu", "engine": "najdi"})
+        history.recent(5)
+        history.get(f"h{i}")
+    assert n_fds() - before <= 1, (before, n_fds())

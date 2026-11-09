@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from contextlib import closing
 
 from . import config
 
@@ -17,17 +18,18 @@ def _conn():
 
 
 def add(rec: dict) -> None:
-    with _conn() as c:
+    # `with sqlite3.connect()` only commits — it does NOT close the connection (file handle stays open until GC). Close explicitly.
+    with closing(_conn()) as c, c:
         c.execute("INSERT OR REPLACE INTO gens VALUES(:id,:ts,:voice,:dialect,:emotion,:speed,:text,:seconds,:took,:device,:engine)",
                   {**rec, "ts": time.time()})
 
 
 def recent(limit: int = 20) -> list[dict]:
-    with _conn() as c:
+    with closing(_conn()) as c:
         return [dict(r) for r in c.execute("SELECT * FROM gens ORDER BY ts DESC LIMIT ?", (limit,))]
 
 
 def get(gid: str) -> dict | None:
-    with _conn() as c:
+    with closing(_conn()) as c:
         r = c.execute("SELECT * FROM gens WHERE id=?", (gid,)).fetchone()
         return dict(r) if r else None

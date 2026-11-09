@@ -104,8 +104,9 @@ def main() -> int:
 
         def snap(step, **extra):
             kids = proc.children(recursive=True)
+            ofs = proc.open_files()
             r = {"step": step, "ram_gb": round(proc.memory_info().rss / 2 ** 30, 2), "threads": proc.num_threads(),
-                 "open_files": len(proc.open_files()), "children": len(kids), **extra}
+                 "open_files": len(ofs), "open_paths": sorted({f.path for f in ofs})[-10:], "children": len(kids), **extra}
             rows.append(r)
             print(json.dumps(r, ensure_ascii=False), flush=True)
             return r
