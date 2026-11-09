@@ -282,14 +282,23 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
         for i, s in enumerate(segs):
             if len(s["spoken"]) >= 12:
                 word_chk[i] = _asr_check(enh_waves[i], s["spoken"])
+    f0_raw = {i: _f0_median_st(w) for i, w in enumerate(enh_waves) if len(w) >= 1.5 * audio.SR}
+    f0_have = [x for x in f0_raw.values() if x is not None]
+    med_f0 = float(np.median(f0_have)) if len(f0_have) >= 4 else None
+    def _f0pen(w):
+        if med_f0 is None:
+            return 0.0
+        f = _f0_median_st(w) if len(w) >= 1.5 * audio.SR else None
+        return 0.0 if f is None else 0.15 * min(abs(f - med_f0), 4.0)
     spk = {i: _spk_sim(enh_waves[i], seg_ctx[i]["ref"]) for i in range(len(segs))} if speaker.available() else {}
     med_spk = float(np.median([x for x in spk.values() if x is not None])) if any(x is not None for x in spk.values()) else None
     flagged = [i for i in range(len(segs)) if (i in word_chk and _bad(word_chk[i])) or
-               (med_spk is not None and spk.get(i) is not None and spk[i] < med_spk - 0.18 and len(enh_waves[i]) >= 1.5 * audio.SR and len(segs) >= 3)]
+               (med_spk is not None and spk.get(i) is not None and spk[i] < med_spk - 0.18 and len(enh_waves[i]) >= 1.5 * audio.SR and len(segs) >= 3) or
+               (med_f0 is not None and f0_raw.get(i) is not None and abs(f0_raw[i] - med_f0) > 2.0)]
     for i in flagged:
         c0 = seg_ctx[i]
         best_w, best_c, best_spk = enh_waves[i], word_chk.get(i), spk.get(i)
-        best_sc = _score(best_c, best_spk) if best_c else (best_spk or 0)
+        best_sc = (_score(best_c, best_spk) if best_c else (best_spk or 0)) - _f0pen(best_w)
         for k in (1, 2):
             progress(0.82, f"إصلاح الجملة {i + 1} (محاولة {k})")
             w2, _ = wave_for(c0["spoken"], c0["ref"], c0["ref_text"], c0["speed"], c0["nfe"],
@@ -297,7 +306,7 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
                              exag=c0["exag"], cfg_w=c0["cfg"])
             c2 = _asr_check(w2, c0["spoken"]) if (use_asr and len(c0["spoken"]) >= 12) else None
             sp2 = _spk_sim(w2, c0["ref"]) if speaker.available() else None
-            sc2 = _score(c2, sp2) if c2 else (sp2 or 0)
+            sc2 = (_score(c2, sp2) if c2 else (sp2 or 0)) - _f0pen(w2)
             if sc2 > best_sc + 0.02:
                 best_w, best_c, best_spk, best_sc = w2, c2, sp2, sc2
         improved = best_w is not enh_waves[i]
@@ -515,8 +524,8 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
         add("mastering", "المعالجة لم تغيّر طبيعة الصوت", "skipped", "تعذّر القياس")
     if timbre["f0_spread_before"] is not None:
         fa = timbre["f0_spread_after"] if timbre["f0_spread_after"] is not None else timbre["f0_spread_before"]
-        add("pitch", "ثبات طبقة الصوت بين الجمل", "ok" if fa <= 1.0 else "warn",
-            f"انحراف النغمة بين الجمل {timbre['f0_spread_before']} ← {fa} نصف نغمة (الحد 1.0)" + (f" · صُحّحت {len(timbre['pitch_fixed'])} جملة" if timbre["pitch_fixed"] else ""))
+        add("pitch", "ثبات طبقة الصوت بين الجمل", "ok" if fa <= 1.5 else "warn",
+            f"انحراف النغمة بين الجمل {timbre['f0_spread_before']} ← {fa} نصف نغمة (الحد 1.5؛ بعض التفاوت طبيعي مع اختلاف المعنى)" + (f" · صُحّحت {len(timbre['pitch_fixed'])} جملة" if timbre["pitch_fixed"] else ""))
     else:
         add("pitch", "ثبات طبقة الصوت بين الجمل", "skipped", "الجمل قصيرة أو قليلة")
     if timbre["band_before"] is not None:
