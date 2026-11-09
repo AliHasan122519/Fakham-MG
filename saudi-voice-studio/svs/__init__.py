@@ -1,7 +1,7 @@
 """Saudi Voice Studio — free, open-source Saudi Arabic voice-over studio."""
 import os
 
-__version__ = "1.0.0-rc.2"
+__version__ = "1.0.0-rc.3"
 
 # The server is headless. Notebook environments (Colab/Jupyter) export
 # MPLBACKEND=module://matplotlib_inline.backend_inline, which only exists inside an IPython kernel;
@@ -15,3 +15,9 @@ os.environ["MPLBACKEND"] = "Agg"
 # fp32 stayed flat (2.41 GB over 8 sentences). Capping the primitive cache bounds it (plateau ~3.1 GB) at no measurable speed cost.
 # Must be set before torch is imported; a user-provided value always wins.
 os.environ.setdefault("ONEDNN_PRIMITIVE_CACHE_CAPACITY", "8")
+
+try:                                  # cap glibc malloc arenas before any worker thread exists (see svs/memory.py)
+    from . import memory as _memory
+    _memory.tune()
+except Exception:                     # pragma: no cover - never block start-up on an optimisation
+    pass

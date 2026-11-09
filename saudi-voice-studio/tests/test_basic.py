@@ -107,3 +107,10 @@ def test_history_does_not_leak_file_handles():
         history.recent(5)
         history.get(f"h{i}")
     assert n_fds() - before <= 1, (before, n_fds())
+
+
+def test_memory_hygiene_is_safe_and_applies_on_linux():
+    from svs import memory
+    memory.release()                                   # must never raise
+    if __import__("sys").platform.startswith("linux"):
+        assert memory.tune() is True                   # glibc: arena cap accepted

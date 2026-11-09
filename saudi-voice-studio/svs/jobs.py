@@ -5,7 +5,7 @@ import threading
 import time
 import uuid
 
-from . import studio
+from . import memory, studio
 from .engine import EngineUnavailable
 
 JOBS: dict[str, dict] = {}
@@ -38,6 +38,7 @@ def start(fn=None, **kwargs) -> str:
         except Exception as e:  # pragma: no cover
             job.update(state="error", error=f"خطأ غير متوقع: {type(e).__name__}: {e}")
         job["elapsed"] = round(time.time() - job["started"], 1)
+        memory.release()                                 # return freed heap pages to the OS after every job (no restart, no model reload)
 
     threading.Thread(target=run, daemon=True).start()
     return jid

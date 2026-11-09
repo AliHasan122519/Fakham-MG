@@ -130,7 +130,10 @@ class Engine:
             with ctx:
                 wave, sr, _ = infer_process(ref_a, ref_t, text, model, self._vocoder,
                                             nfe_step=int(nfe_step), speed=float(speed))
-            return np.asarray(wave, dtype=np.float32), int(sr)
+            out = np.asarray(wave, dtype=np.float32), int(sr)
+            from . import memory
+            memory.release()
+            return out
 
 
 ENGINE = Engine()
