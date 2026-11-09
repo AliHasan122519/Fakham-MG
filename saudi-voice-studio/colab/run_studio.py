@@ -8,6 +8,8 @@ ENABLE_SMART_ENHANCEMENT = True  #@param {type:"boolean"}
 #@markdown ⚠️ ربط Drive يمنح بيئة التشغيل وصولًا لكل ملفات Drive لديك (Colab لا يسمح بربط مجلد واحد فقط). الكود يكتب داخل `saudi-voice-studio/` فقط، لكن إن كنت لا تريد هذا الوصول أزل العلامة (ستُعاد تنزيلات النماذج ~2.6GB كل جلسة ولا تُحفظ الشخصيات).
 ENABLE_EXPRESSIVE_ENGINE = False  #@param {type:"boolean"}
 #@markdown (اختياري — تجريبي: محرك Chatterbox المفتوح MIT بمفتاح تعبير حقيقي للفصحى فقط. يضيف بيئة منفصلة ~5GB + أوزان 3.3GB ووقت تثبيت أطول. اتركه معطّلًا في أول تشغيل.)
+STABLE_WORKER_URL = ""  #@param {type:"string"}
+#@markdown (اختياري — رابط MCP ثابت لا يتغير بين التشغيلات: ضع هنا رابط Worker المجاني الذي أنشأته مرة واحدة (انظر docs/STABLE-MCP-LINK.md)، مثل https://saudi-studio.اسمك.workers.dev — يتطلب حساب Cloudflare مجانيًا بلا بطاقة. اتركه فارغًا لرابط يتغير كل تشغيل.)
 RUN_BENCHMARK = False  #@param {type:"boolean"}
 #@markdown (قياس السرعة الفعلية على هذا الجهاز: جملة، نص كامل، إعادة توليد جملة + دمج، مع جودة النتائج. يطبع JSON تنسخه وترسله. فعّله مع GPU T4: ‏«وقت التشغيل ← تغيير نوع وقت التشغيل ← T4».)
 ALLOW_UNVERIFIED_CLOUDFLARED = False  #@param {type:"boolean"}
@@ -26,7 +28,7 @@ CF_SHA256 = "1f99fb518b83dec2ba8d870a7cc991d82a77e6196295a3d2754ba17ab9f91872"
 UV_PIN = "uv==0.13.7"
 PINS = ["torch==2.8.0", "torchaudio==2.8.0", "habibi-tts==0.1.1", "mcp==2.3.0", "fastapi==0.162.2",
         "uvicorn==0.54.0", "python-multipart==0.0.33", "soundfile==0.14.0", "huggingface_hub==1.33.0",
-        "transformers==5.22.2", "faster-whisper==1.2.1", "speechbrain==1.1.2"]
+        "transformers==5.22.2", "faster-whisper==1.2.1", "speechbrain==1.1.2", "psutil==7.2.2"]
 EXP_PINS = ["torch==2.6.0", "torchaudio==2.6.0", "numpy>=2.0.0", "librosa==0.11.0", "s3tokenizer==0.3.0", "transformers==5.2.0",
             "diffusers==0.29.0", "resemble-perth==1.0.1", "conformer==0.3.2", "safetensors==0.5.3", "spacy-pkuseg==1.0.2",
             "pykakasi==2.3.0", "pyloudnorm==0.2.0", "omegaconf==2.4.0", "huggingface_hub==1.33.0", "soundfile==0.14.0",
@@ -122,8 +124,19 @@ def main():
             say(f"⚠️ تعذّر ربط Drive ({e}). سأحفظ مؤقتًا في الجلسة؛ سيُعاد التنزيل في كل مرة.")
     home = home or Path(os.environ.get("SVS_HOME", "/content/svs-data"))
     home.mkdir(parents=True, exist_ok=True)
-    # رمز سري جديد في كل تشغيل، ولا يُحفظ على Drive أبدًا
+    # رمز سري جديد في كل تشغيل ولا يُحفظ على Drive — إلا إن فعّلتَ صراحةً STABLE_WORKER_URL (رابط ثابت)
     token = secrets.token_urlsafe(32)
+    if STABLE_WORKER_URL:      # رمز ثابت (محفوظ في مجلد التطبيق على Drive) حتى لا يتغير رابط الموصل بين التشغيلات
+        tf = home / ".stable_token"
+        try:
+            if tf.is_file() and len(tf.read_text().strip()) >= 32:
+                token = tf.read_text().strip()
+            else:
+                home.mkdir(parents=True, exist_ok=True)
+                tf.write_text(token)
+                os.chmod(tf, 0o600)
+        except Exception as e:
+            say(f"⚠️ تعذّر حفظ الرمز الثابت ({e}); سيتغير الرمز هذا التشغيل.")
 
     # نمرّر للعمليات الفرعية متغيرات البيئة غير السرية فقط (لا مفاتيح/رموز/كلمات مرور من بيئتك)
     secretish = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)", re.I)
@@ -243,11 +256,30 @@ def main():
             except Exception:
                 public = None  # لا نعرض رابطًا لا يعمل
 
+    stable_mcp = None
+    if public and STABLE_WORKER_URL:      # سجّل رابط النفق الحالي لدى الـ Worker الثابت
+        try:
+            sec = ""
+            try:
+                from google.colab import userdata
+                sec = userdata.get("SVS_WORKER_SECRET") or ""
+            except Exception:
+                sec = os.environ.get("SVS_WORKER_SECRET", "")
+            if not sec:
+                raise RuntimeError("أضف السر SVS_WORKER_SECRET في «الأسرار» (🔑) في Colab وفعّل «الوصول من الدفتر»")
+            req = urllib.request.Request(STABLE_WORKER_URL.rstrip("/") + "/_register", method="POST",
+                                         data=json.dumps({"secret": sec, "url": public}).encode(),
+                                         headers={"Content-Type": "application/json", "User-Agent": "svs-colab/1"})
+            urllib.request.urlopen(req, timeout=30).read()
+            stable_mcp = f"{STABLE_WORKER_URL.rstrip('/')}/mcp?token={token}"
+            say("✅ سُجّل الرابط الحالي لدى الـ Worker الثابت.")
+        except Exception as e:
+            say(f"⚠️ تعذّر تسجيل الرابط الثابت ({e}). سأستخدم الرابط المؤقت.")
     mcp_ok = None
     if public:       # اختبار تكامل MCP الفعلي عبر الرابط العام (نفس الطريق الذي يسلكه موصل Claude)
         def _rpc(method, params=None, i=1):
             req = urllib.request.Request(
-                mcp_url, method="POST", data=json.dumps({"jsonrpc": "2.0", "id": i, "method": method, "params": params or {}}).encode(),
+                (stable_mcp or mcp_url), method="POST", data=json.dumps({"jsonrpc": "2.0", "id": i, "method": method, "params": params or {}}).encode(),
                 headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
             raw = urllib.request.urlopen(req, timeout=30).read().decode()
             if raw.lstrip().startswith("event:") or raw.lstrip().startswith("data:"):
@@ -257,7 +289,7 @@ def main():
             _rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "colab-selfcheck", "version": "1"}})
             n = len(_rpc("tools/list", i=2)["result"]["tools"])
             mcp_ok = n
-            say(f"✅ اختبار MCP عبر الرابط العام نجح: {n} أداة متاحة.")
+            say(f"✅ اختبار MCP عبر الرابط {'الثابت' if stable_mcp else 'العام'} نجح: {n} أداة متاحة.")
         except Exception as e:
             mcp_ok = False
             say(f"❌ اختبار MCP عبر الرابط العام فشل ({e}). الواجهة قد تعمل لكن موصل Claude لن يعمل (غالبًا 502). أعد تشغيل الخلية للحصول على رابط جديد.")
@@ -268,7 +300,10 @@ def main():
     if public:
         say("✅ الخادم يعمل. اضغط مطوّلًا على الرابط لنسخه أو افتحه:")
         say(f"\n🎙️ رابط الواجهة (افتحه في متصفح الجوال):\n{ui}")
-        say(f"\n🔌 رابط MCP (للصقه في موصل Claude — اختياري):\n{mcp_url}")
+        if stable_mcp:
+            say(f"\n🔌 رابط MCP **الثابت** (الصقه في موصل Claude مرة واحدة فقط ولا يتغير):\n{stable_mcp}")
+        else:
+            say(f"\n🔌 رابط MCP (للصقه في موصل Claude — يتغير كل تشغيل، فحدّث الموصل بعد كل تشغيل):\n{mcp_url}")
         say("\n🔒 الرابطان يحتويان رمزك السري ومن يملكهما يستطيع استخدام الاستوديو (وموارد Colab الخاصة بك).")
         say("   • لا تشاركهما، ولا تحفظ نسخة من الدفتر «مع المخرجات» (File ← Save a copy) ولا تشارك الدفتر وهو يعرضهما.")
         say("   • الرمز يتجدد كل تشغيل؛ اضغط «Disconnect and delete runtime» لإبطال الرابط فورًا.")
