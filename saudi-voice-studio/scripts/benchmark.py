@@ -115,7 +115,8 @@ def main() -> int:
     sam_mark = sam.mark()
     marks: list = []
     t0 = time.time()
-    take = auto.run(TEXT, voice=voice, progress=lambda p, m: marks.append((round(time.time() - t0, 1), round(p, 2), m)))
+    from svs import studio
+    take = studio.take_view(auto.run(TEXT, voice=voice, progress=lambda p, m: marks.append((round(time.time() - t0, 1), round(p, 2), m))))
     total = time.time() - t0
     qc = take.get("qc") or {}
     intel = list((take.get("intelligibility") or {}).values())
@@ -141,7 +142,7 @@ def main() -> int:
     seg_id = take["segments"][len(take["segments"]) // 2]["id"]
     sam_mark2 = sam.mark()
     t1 = time.time()
-    take2 = render.regenerate(take["id"], seg_id, new_seed=True)
+    take2 = studio.take_view(render.regenerate(take["id"], seg_id, new_seed=True))
     out["regenerate_one_sentence_and_merge"] = {"segment": seg_id, "total_s": round(time.time() - t1, 1),
                                                 "qc_status": (take2.get("qc") or {}).get("status")}
     out["regenerate_one_sentence_and_merge"]["resources"] = sam.report(sam_mark2)
