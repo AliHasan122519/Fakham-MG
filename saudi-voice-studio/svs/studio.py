@@ -50,7 +50,7 @@ def take_view(take: dict) -> dict:
             "voice": take["plan"]["voice"], "style": take["plan"]["style"], "mode": take["plan"]["mode"],
             "warnings": take["warnings"], "metrics": take["metrics"], "cache_hits": take["cache_hits"],
             "intelligibility": take.get("intelligibility", {}), "intelligibility_compare": take.get("intelligibility_compare"),
-            "baseline_kind": take.get("baseline_kind"), "qc": take.get("qc"), "voice_match": take.get("voice_match"),
+            "baseline_kind": take.get("baseline_kind"), "qc": take.get("qc"), "draft": bool(take.get("draft")), "voice_match": take.get("voice_match"),
             "segments": [{"id": s["id"], "text": s["text"], "corrected": s.get("corrected"), "vocalized": s.get("vocalized"), "spoken": s["spoken"], "emotion": s["emotion"],
                           "intensity": s["intensity"], "params": s["params"], "seed": s["seed"]}
                          for s in take["plan"]["segments"]]}

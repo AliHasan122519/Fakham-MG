@@ -337,3 +337,46 @@ def test_every_emotion_has_a_recording_prompt():
             continue
         d, t = delivery.EMOTION_PROMPTS[k]
         assert d and len(t.split()) >= 8, k                      # a sentence long enough for a 5-10 s clip
+
+
+def _stub_synth(spoken, ref, ref_text, *, engine, speed, nfe, seed):
+    sr = 24000
+    n = int(sr * len(spoken) * 0.07 / speed)
+    t = np.arange(n) / sr
+    w = sum(np.sin(2 * np.pi * 140 * h * t) / h for h in range(1, 8)) * (0.6 + 0.4 * np.sin(2 * np.pi * 3 * t) ** 2)
+    return (0.2 * w).astype(np.float32), sr
+
+
+def test_draft_is_clearly_separate_from_final_and_cannot_be_downloaded_as_final():
+    from fastapi.testclient import TestClient
+    from svs import web
+    text = "وصلنا إلى المدينة في الصباح الباكر. ثم ذهبنا إلى السوق القديم لنشتري بعض الهدايا. وعدنا في المساء سعداء."
+    d = render.render(planmod.build(text, voice="narrator_deep"), synth_fn=_stub_synth, draft=True)
+    assert d["draft"] is True and d["qc"]["draft"] is True and d["qc"]["repair_attempts"] == 0
+    c = TestClient(web.app)
+    H = {"x-svs-token": "t"}
+    r = c.get(f"/files/{d['id']}/master.mp3?download=1", headers=H)
+    assert r.status_code == 200 and "DRAFT" in r.headers["content-disposition"] and r.headers.get("x-svs-draft") == "1"
+    f = render.finalize(d["id"], synth_fn=_stub_synth)                   # same plan, full pipeline
+    assert f["draft"] is False and f["parent"] == d["id"] and f["plan"]["id"] == d["plan"]["id"]
+    r2 = c.get(f"/files/{f['id']}/master.mp3?download=1", headers=H)
+    assert "DRAFT" not in r2.headers["content-disposition"] and "x-svs-draft" not in r2.headers
+    # settings never leak between modes: the plan/controls of the draft are exactly the final's
+    assert f["plan"]["controls"] == d["plan"]["controls"]
+
+
+def test_draft_flag_is_not_stored_in_controls_or_plan():
+    p = planmod.build("نص.", voice="narrator_deep", controls={"stability": 0.5})
+    assert "draft" not in p and "draft" not in p["controls"]
+
+
+def test_repair_loop_stops_at_first_good_attempt_but_never_for_unresolved(monkeypatch):
+    """Early stop: an attempt that resolves the problem ends the loop; if it does not, the second attempt still happens."""
+    calls = []
+    def flaky(spoken, ref, ref_text, *, engine, speed, nfe, seed):
+        calls.append(seed)
+        return _stub_synth(spoken, ref, ref_text, engine=engine, speed=speed, nfe=nfe, seed=seed)
+    text = "وصلنا إلى المدينة في الصباح الباكر. ثم ذهبنا إلى السوق القديم لنشتري بعض الهدايا لأهلنا. وفي المساء عدنا إلى البيت متعبين لكن سعداء. كانت رحلة جميلة لا تُنسى أبدًا. وهكذا انتهت القصة بخير."
+    take = render.render(planmod.build(text, voice="narrator_deep"), synth_fn=flaky)
+    assert take["qc"]["repair_attempts"] <= 2 * len(take["segments"])
+    assert isinstance(take["qc"]["fixed_sentences"], list) and isinstance(take["qc"]["unresolved_sentences"], list)

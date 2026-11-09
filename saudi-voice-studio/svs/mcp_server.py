@@ -51,6 +51,9 @@ def _job_view(job: dict) -> dict:
     if job["state"] == "done":
         t = studio.take_view(job["result"])
         tid = t["id"]
+        if t.get("draft"):
+            out["draft"] = True
+            out["warning"] = "مسودة سريعة بلا فحوص وإصلاحات الجودة — ليست للتسليم النهائي. استدعِ finalize_take(take_id) للاعتماد."
         out.update(take_id=tid, mp3_url=_link(tid, "mp3"), wav_url=_link(tid, "wav"), stream_url=_link(tid, "mp3", False),
                    before_mp3_url=_raw_link(tid), seconds=t["seconds"], took_seconds=t["took"], device=t["device"],
                    voice=t["voice"], dialect=t["dialect"], style=t["style"], dialect_native=t["dialect_native"], voice_match=t.get("voice_match"), qc=(t.get("qc") or {}).get("status"), qc_checks=[{"check": c["name"], "status": c["status"], "detail": c["detail"]} for c in (t.get("qc") or {}).get("checks", [])],
@@ -334,8 +337,26 @@ def get_download_links(generation_id: str) -> dict:
         render.load_take(generation_id)
     except render.RenderError as e:
         return {"error": str(e)}
-    return {"id": generation_id, "mp3_url": _link(generation_id, "mp3"), "wav_url": _link(generation_id, "wav"),
-            "before_mp3_url": _raw_link(generation_id)}
+    out = {"id": generation_id, "mp3_url": _link(generation_id, "mp3"), "wav_url": _link(generation_id, "wav"),
+           "before_mp3_url": _raw_link(generation_id)}
+    if render.load_take(generation_id).get("draft"):
+        out["draft"] = True
+        out["warning"] = "هذه مسودة سريعة بلا فحوص وإصلاحات الجودة — لا تسلّمها كنسخة نهائية؛ استدعِ finalize_take أولًا."
+    return out
+
+
+@mcp.tool()
+def finalize_take(take_id: str, wait_seconds: int = 45) -> dict:
+    """حوّل مسودة سريعة (draft=true) إلى نسخة نهائية: نفس الخطة والجمل (من الذاكرة المؤقتة) مع خط الجودة الكامل
+    (تشكيل مُتحقَّق، فحص الجودة وإصلاح الجمل المنحرفة، توحيد النبرة والجرس). يعيد روابط MP3/WAV أو job id."""
+    try:
+        render.load_take(take_id)
+    except render.RenderError as e:
+        return {"state": "error", "error": str(e)}
+    if jobs.running_count() >= jobs.MAX_RUNNING:
+        return {"state": "error", "error": "توجد مهام توليد قيد التنفيذ؛ انتظر حتى تنتهي ثم أعد المحاولة."}
+    jid = jobs.start(lambda progress=None, **kw: render.finalize(progress=progress, **kw), take_id=take_id)
+    return _job_view(jobs.wait(jid, max(0, min(wait_seconds, 110))))
 
 
 @mcp.tool()

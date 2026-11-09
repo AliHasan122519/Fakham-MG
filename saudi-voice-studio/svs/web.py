@@ -267,6 +267,18 @@ def api_regen(take_id: str, req: RegenReq):
     return {"job": jobs.start(_regen, take_id=take_id, segment_id=req.segment_id, edits=req.edits, new_seed=req.new_seed)}
 
 
+@app.post("/api/takes/{take_id}/finalize", dependencies=[Depends(auth)])
+def api_finalize(take_id: str):
+    """Draft -> final: full quality pipeline on the same plan (sentences reused from the cache)."""
+    if jobs.running_count() >= jobs.MAX_RUNNING:
+        raise HTTPException(429, "توجد مهام توليد قيد التنفيذ؛ انتظر حتى تنتهي.")
+    try:
+        render.load_take(take_id)
+    except render.RenderError as e:
+        raise HTTPException(404, str(e))
+    return {"job": jobs.start(lambda progress=None, **kw: render.finalize(progress=progress, **kw), take_id=take_id)}
+
+
 @app.get("/api/jobs/{jid}", dependencies=[Depends(auth)])
 def api_job(jid: str):
     job = jobs.get(jid)
@@ -306,8 +318,15 @@ def files_take(take_id: str, name: str, download: int = 0):
         p = render.take_file(take_id, name)
     except render.RenderError as e:
         raise HTTPException(404, str(e))
+    draft = False
+    try:
+        draft = bool(render.load_take(take_id).get("draft"))
+    except Exception:
+        pass
+    tag = "DRAFT-" if draft else ""                      # a draft can never be downloaded under a deliverable-looking name
     return FileResponse(p, media_type="audio/mpeg" if name.endswith(".mp3") else "audio/wav",
-                        filename=f"saudi-voice-{take_id}-{name}" if download else None)
+                        filename=f"saudi-voice-{tag}{take_id}-{name}" if download else None,
+                        headers={"X-SVS-Draft": "1"} if draft else None)
 
 
 @app.get("/files/{take_id}.{ext}", dependencies=[Depends(auth)])

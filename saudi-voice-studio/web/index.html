@@ -102,6 +102,9 @@ table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{padding:5px 4px
     <audio id="hplayer" controls preload="auto"></audio>
     <div class="row" style="margin-top:8px"><a class="btn sm" id="hdl" download>⬇ تنزيل MP3</a><a class="btn sm ghost" id="hdlw" download>⬇ WAV</a></div>
     <div class="note" id="hmeta" style="margin-top:8px"></div>
+    <div id="hdraftbar" class="hide" style="background:#5a3b00;color:#fff;padding:8px;border-radius:8px;margin-top:8px">
+      ⚠ <b>مسودة سريعة</b> — لم تُجرَ الإصلاحات التلقائية (إعادة الجمل المنحرفة، التشكيل المتحقَّق). للمعاينة فقط.
+      <button class="btn sm" id="hfinal" type="button" style="margin-top:6px">✅ اعتماد نهائي (يعيد الفحص والإصلاح)</button></div>
     <details id="hqcbox" open><summary id="hqcsum">فحص الجودة التلقائي</summary><div id="hqc" class="note"></div></details>
     <div class="row" style="margin-top:8px"><button class="btn ghost sm" id="hregen" type="button">🔁 أعد التوليد (نسخة جديدة)</button></div>
   </div>
@@ -511,9 +514,17 @@ $('#hgo').onclick=async()=>{$('#herr').textContent='';$('#hres').classList.add('
         const vm=t.voice_match,vf=vm&&(vm.final!=null?vm.final:vm.mean);$('#hmeta').innerHTML=esc(`${t.seconds}ث · استغرق ${t.took}ث`)+(vm?`<br>تشابه الصوت مع مقطعك (الملف النهائي): <b>${vf.toFixed(2)}</b> <span class="note">(${esc(vm.scale)})</span>${vf<0.4?'<br><span class="warn">⚠ التشابه منخفض؛ جرّب مقطعًا مرجعيًا أوضح أو أطول قليلًا.</span>':''}`:'')
           +((t.warnings||[]).includes('demo')?'<br><span class="warn">⚠ يستخدم مقطعًا تجريبيًا؛ ارفع صوتك في الخطوة ١.</span>':'')
           +((t.warnings||[]).filter(w=>w.startsWith('low_intelligibility')).map(w=>`<br><span class="warn">⚠ الجملة ${esc(w.split(':')[1])} قليلة الوضوح (${esc(w.split(':')[2])}%).</span>`).join(''));
-        renderQC(t.qc);$('#hbarf').style.width='100%';$('#hmsg').textContent='تم ✔';break}}
+        renderQC(t.qc);$('#hdraftbar').classList.toggle('hide',!t.draft);S.lastTake=t.id;$('#hdl').textContent=t.draft?'⬇ تنزيل MP3 (مسودة)':'⬇ تنزيل MP3';$('#hbarf').style.width='100%';$('#hmsg').textContent='تم ✔';break}}
   }catch(e){$('#herr').textContent=e.message}finally{$('#hgo').disabled=false}};
 $('#hregen').onclick=()=>$('#hgo').click();
+$('#hfinal').onclick=async()=>{if(!S.lastTake)return;$('#hfinal').disabled=true;$('#herr').textContent='';
+  try{const r=await jpost('/api/takes/'+S.lastTake+'/finalize',{});
+    for(;;){await new Promise(x=>setTimeout(x,2000));const j=await api('/api/jobs/'+r.job);$('#hmsg').textContent='⏳ اعتماد نهائي: '+(j.message||'');
+      if(j.state==='error')throw new Error(j.error);
+      if(j.state==='done'){const t=j.take;S.take=t;S.lastTake=t.id;$('#hplayer').src=q(`/files/${t.id}/master.mp3`);
+        $('#hdl').href=q(`/files/${t.id}/master.mp3`+(TOKEN?'&':'?')+'download=1');$('#hdlw').href=q(`/files/${t.id}/master.wav`+(TOKEN?'&':'?')+'download=1');
+        $('#hdl').textContent='⬇ تنزيل MP3';renderQC(t.qc);$('#hdraftbar').classList.add('hide');$('#hmsg').textContent='تم الاعتماد النهائي ✔';break}}
+  }catch(e){$('#herr').textContent=e.message}finally{$('#hfinal').disabled=false}};
 load().then(()=>{proInit();homeInit();emoInit()}).catch(e=>{$('#herr').textContent=e.message});
 </script>
 </body>

@@ -122,3 +122,119 @@ def pause_noise_db(x: np.ndarray) -> float | None:
     if len(run) >= 15:
         vals.append(float(np.median(run)))
     return float(np.median(vals)) if vals else None
+
+
+F0_SPREAD_LIMIT = 1.5      # robust spread (semitones) allowed between sentence pitches when there are enough sentences
+F0_ANCHOR_LIMIT = 3.0      # with few sentences: max distance (semitones) of any sentence from the reference clip's pitch
+F0_MIN_N = 5               # fewer sentences than this cannot give a trustworthy spread estimate
+
+
+def f0_assess(f0s: list[float], ref_f0: float | None) -> dict:
+    """Statistically sound pitch-consistency assessment.
+    * n >= 5: robust spread (1.4826 x MAD around the median) — outlier-resistant, unlike a plain std on a handful of values.
+    * n < 5: a spread of 2-4 numbers is not meaningful, so each sentence is compared with the REFERENCE clip's pitch instead.
+    Returns {mode, n, center, spread, limit, ok, outliers: indices beyond limit}."""
+    v = np.asarray([x for x in f0s if x is not None], dtype=float)
+    n = len(v)
+    if n >= F0_MIN_N:
+        med = float(np.median(v))
+        sd = float(1.4826 * np.median(np.abs(v - med)))
+        out = [i for i, x in enumerate(f0s) if x is not None and abs(x - med) > max(2.0, 2.0 * sd)]
+        return {"mode": "spread", "n": n, "center": med, "spread": round(sd, 2), "limit": F0_SPREAD_LIMIT,
+                "ok": sd <= F0_SPREAD_LIMIT, "outlier_idx": out, "outlier_thr": 2.0}
+    if n >= 1 and ref_f0 is not None:
+        dev = [None if x is None else abs(x - ref_f0) for x in f0s]
+        worst = max(d for d in dev if d is not None)
+        out = [i for i, d in enumerate(dev) if d is not None and d > F0_ANCHOR_LIMIT]
+        return {"mode": "anchor", "n": n, "center": float(ref_f0), "spread": round(worst, 2), "limit": F0_ANCHOR_LIMIT,
+                "ok": worst <= F0_ANCHOR_LIMIT, "outlier_idx": out, "outlier_thr": F0_ANCHOR_LIMIT}
+    return {"mode": "insufficient", "n": n, "center": None, "spread": None, "limit": None, "ok": True, "outlier_idx": [], "outlier_thr": None}
+
+
+def _eq_intent_max_db(filters: list[str] | None) -> float:
+    import re as _re
+    g = [abs(float(m)) for f in (filters or []) for m in _re.findall(r":g=(-?\d+(?:\.\d+)?)", f)]
+    return float(max(g)) if g else 0.0
+
+
+def _eq_intent_db(filters: list[str] | None) -> float:
+    """Mean absolute gain over the 8 analysis bands implied by a list of ffmpeg `equalizer=...:g=X` filters (the INTENDED tonal change)."""
+    import re as _re
+    g = [abs(float(m)) for f in (filters or []) for m in _re.findall(r":g=(-?\d+(?:\.\d+)?)", f)]
+    return float(sum(g) / 8.0) if g else 0.0
+
+
+def transparency(pre: np.ndarray, post: np.ndarray, *, ref: np.ndarray | None = None, intended_db: float = 0.0,
+                 intended_max_db: float | None = None, sim: float | None = None) -> dict:
+    """Is the mastered audio still the same voice, only polished? Separates INTENDED tonal change (declared via `intended_db`,
+    e.g. reference-matching EQ) from UNWANTED change, and checks artefacts that speaker similarity cannot see
+    (muffling, hiss, clipping, crushed dynamics, added reverb). Speaker similarity alone is NOT used as the verdict.
+    Every limit is fixed and documented; `intended_db` only raises the tonal budget by what was deliberately applied."""
+    from . import audio
+    n = min(len(pre), len(post))
+    pre, post = np.asarray(pre[:n], dtype=np.float32), np.asarray(post[:n], dtype=np.float32)
+    mid = [i for i, (c, _) in enumerate(audio._EQ_BANDS) if c in (500, 1000)]
+
+    def norm(x):
+        b = audio._band_levels(x, SR)
+        return b - b[mid].mean()
+    bp, bq = norm(pre), norm(post)
+    td = float(np.abs(bp - bq).mean())
+    reasons, info = [], {"tonal_change_db": round(td, 2), "intended_db": round(float(intended_db), 2)}
+    limit = 1.5 + float(intended_db)
+    mx = float(np.abs(bp - bq).max())
+    imax = float(intended_max_db if intended_max_db is not None else intended_db * 3.0)
+    mlimit = 4.0 + imax
+    info["max_band_change_db"] = round(mx, 2)
+    if td > limit:
+        reasons.append(f"تغيّر جرس غير مبرَّر: {td:.1f} dB (المسموح {limit:.1f} = 1.5 + المقصود {intended_db:.1f})")
+    elif mx > mlimit:
+        reasons.append(f"تغيّر حادّ في نطاق واحد: {mx:.1f} dB (المسموح {mlimit:.1f} = 4.0 + المقصود {imax:.1f})")
+    if ref is not None:
+        br = norm(np.asarray(ref, dtype=np.float32))
+        d_pre, d_post = float(np.abs(bp - br).mean()), float(np.abs(bq - br).mean())
+        info.update(dist_to_reference_before=round(d_pre, 2), dist_to_reference_after=round(d_post, 2))
+        if d_post > d_pre + 0.5:
+            reasons.append(f"ابتعد الجرس عن مقطعك المرجعي ({d_pre:.1f} ← {d_post:.1f} dB)")
+    # noise relative to speech (loudness changes must not count as noise changes)
+    def snr(x):
+        nz = pause_noise_db(x)
+        return None if nz is None else float(audio.active_rms_db(x) - nz)
+    s0, s1 = snr(pre), snr(post)
+    if s0 is not None and s1 is not None:
+        info.update(snr_before=round(s0, 1), snr_after=round(s1, 1))
+        if s0 - s1 > 3.0:
+            reasons.append(f"زاد الضجيج نسبةً للكلام ({s0:.0f} ← {s1:.0f} dB)")
+    r0, r1 = reverb_tail_db(pre), reverb_tail_db(post)
+    if r0 is not None and r1 is not None and r1 - r0 > 6.0:
+        reasons.append(f"زاد ذيل الصدى ({r0:.0f} ← {r1:.0f} dB)")
+    clip = float(np.mean(np.abs(post) > 0.99))
+    if clip > 0:
+        reasons.append(f"تقطيع في {clip * 100:.3f}% من العينات")
+    crest = lambda x: float(20 * np.log10(max(np.abs(x).max(), 1e-9)) - audio.active_rms_db(x))
+    c0, c1 = crest(pre), crest(post)
+    info.update(crest_before=round(c0, 1), crest_after=round(c1, 1))
+    if c0 - c1 > 6.0:
+        reasons.append(f"انسحقت الديناميكية (عامل الذروة {c0:.0f} ← {c1:.0f} dB)")
+    if sim is not None:
+        info["speaker_sim"] = round(float(sim), 3)
+        if sim < 0.90:
+            reasons.append(f"تغيّرت بصمة المتحدث ({sim:.2f} < 0.90)")
+    return {"ok": not reasons, "reasons": reasons, **info}
+
+
+def chain_intent(chain: str | None) -> tuple[float, float]:
+    """(mean |gain| over the 8 analysis bands, max |gain|) that the ffmpeg filter chain was DESIGNED to apply:
+    equalizer bands count for one band each, bass/treble shelves for two bands each. Everything else (loudnorm, gentle
+    compression, high-pass) is not tonal intent and is judged by the artefact checks."""
+    import re as _re
+    gains, per_band = [], 0.0
+    for m in _re.finditer(r"equalizer=[^,]*?:g=(-?\d+(?:\.\d+)?)", chain or ""):
+        g = abs(float(m.group(1)))
+        gains.append(g)
+        per_band += g
+    for m in _re.finditer(r"(?:bass|treble)=g=(-?\d+(?:\.\d+)?)", chain or ""):
+        g = abs(float(m.group(1)))
+        gains.append(g)
+        per_band += 2 * g
+    return (per_band / 8.0, max(gains) if gains else 0.0)

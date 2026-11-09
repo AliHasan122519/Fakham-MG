@@ -124,6 +124,27 @@ def _f0_median_st(w: np.ndarray) -> float | None:
     return float(np.median(12 * np.log2(f0 / 100.0))) if len(f0) >= 25 else None
 
 
+_REF_F0: dict = {}
+
+
+def _ref_f0(path) -> float | None:
+    """Median pitch (semitones re 100 Hz) of the reference clip, cached per file version."""
+    try:
+        p = Path(path)
+        key = (str(p), p.stat().st_mtime_ns)
+        if key not in _REF_F0:
+            w, sr_ = sf.read(str(p), dtype="float32")
+            w = w if w.ndim == 1 else w[:, 0]
+            if sr_ != audio.SR:
+                w = np.interp(np.linspace(0, len(w) - 1, int(len(w) * audio.SR / sr_)), np.arange(len(w)), w).astype(np.float32)
+            if len(_REF_F0) > 32:
+                _REF_F0.clear()
+            _REF_F0[key] = _f0_median_st(w)
+        return _REF_F0[key]
+    except Exception:
+        return None
+
+
 def _process_segment(w: np.ndarray, params: dict, fx: dict) -> np.ndarray:
     w = audio.trim_silence(w)
     cur = audio.active_rms_db(w)
@@ -285,8 +306,10 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
             if len(s["spoken"]) >= 12:
                 word_chk[i] = _asr_check(enh_waves[i], s["spoken"])
     f0_raw = {i: _f0_median_st(w) for i, w in enumerate(enh_waves) if len(w) >= 1.5 * audio.SR}
-    f0_have = [x for x in f0_raw.values() if x is not None]
-    med_f0 = float(np.median(f0_have)) if len(f0_have) >= 4 else None
+    ref_f0 = _ref_f0(seg_ctx[0]["ref"]) if seg_ctx else None
+    f0_a = qc.f0_assess([f0_raw.get(i) for i in range(len(segs))], ref_f0)        # robust statistics; reference anchor when few sentences
+    med_f0 = f0_a["center"]
+    f0_thr = f0_a["outlier_thr"] or 2.0
     def _f0pen(w):
         if med_f0 is None:
             return 0.0
@@ -296,30 +319,45 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
     med_spk = float(np.median([x for x in spk.values() if x is not None])) if any(x is not None for x in spk.values()) else None
     flagged = [i for i in range(len(segs)) if (i in word_chk and _bad(word_chk[i])) or
                (med_spk is not None and spk.get(i) is not None and spk[i] < med_spk - 0.18 and len(enh_waves[i]) >= 1.5 * audio.SR and len(segs) >= 3) or
-               (med_f0 is not None and f0_raw.get(i) is not None and abs(f0_raw[i] - med_f0) > 2.0)]
+               (med_f0 is not None and f0_raw.get(i) is not None and abs(f0_raw[i] - med_f0) > f0_thr)]
     if draft:
         flagged = []
+    early_stop = os.environ.get("SVS_QC_EARLY_STOP", "1") != "0"     # 0 = always try every attempt (used to compare cost/quality)
+    def _resolved(w, c, sp):
+        """A candidate is accepted only if it has no word problem AND is not a pitch/identity outlier."""
+        if c is not None and _bad(c):
+            return False
+        if med_f0 is not None and len(w) >= 1.5 * audio.SR:
+            f = _f0_median_st(w)
+            if f is not None and abs(f - med_f0) > f0_thr:
+                return False
+        if med_spk is not None and sp is not None and len(w) >= 1.5 * audio.SR and len(segs) >= 3 and sp < med_spk - 0.18:
+            return False
+        return True
+    qc_notes["attempts"] = 0
     for i in flagged:
         c0 = seg_ctx[i]
         best_w, best_c, best_spk = enh_waves[i], word_chk.get(i), spk.get(i)
         best_sc = (_score(best_c, best_spk) if best_c else (best_spk or 0)) - _f0pen(best_w)
-        hard = i in word_chk and _bad(word_chk[i])         # wrong/missing words deserve 2 re-rolls; a pitch/identity outlier 1
-        for k in ((1, 2) if hard else (1,)):
+        for k in (1, 2):                    # attempt 2 happens only if attempt 1 did not resolve the problem (never lowered for word errors)
             progress(0.82, f"إصلاح الجملة {i + 1} (محاولة {k})")
             w2, _ = wave_for(c0["spoken"], c0["ref"], c0["ref_text"], c0["speed"], c0["nfe"],
                              (int(segs[i]["seed"]) + 15485863 * k) & 0x7FFFFFFF, verify=False, label="", frac=0.82,
                              exag=c0["exag"], cfg_w=c0["cfg"])
+            qc_notes["attempts"] += 1
             c2 = _asr_check(w2, c0["spoken"]) if (use_asr and len(c0["spoken"]) >= 12) else None
             sp2 = _spk_sim(w2, c0["ref"]) if speaker.available() else None
             sc2 = (_score(c2, sp2) if c2 else (sp2 or 0)) - _f0pen(w2)
             if sc2 > best_sc + 0.02:
                 best_w, best_c, best_spk, best_sc = w2, c2, sp2, sc2
+            if early_stop and _resolved(best_w, best_c, best_spk):
+                break
         improved = best_w is not enh_waves[i]
         enh_waves[i] = best_w
         if best_c:
             word_chk[i] = best_c
         spk[i] = best_spk
-        (qc_notes["fixed"] if improved and (not best_c or not _bad(best_c)) else qc_notes["unresolved"]).append(segs[i]["id"])
+        (qc_notes["fixed"] if improved and _resolved(best_w, best_c, best_spk) else qc_notes["unresolved"]).append(segs[i]["id"])
     # pace harmonisation: pull every sentence toward ONE steady pace (relative to its planned speed), within ±12 %
     rates = [qc.chars_per_second(w, s["spoken"]) for w, s in zip(enh_waves, segs)]
     norm = [(r / c["speed"]) if r else None for r, c in zip(rates, seg_ctx)]
@@ -345,17 +383,19 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
     # timbre/pitch harmonisation: sentences synthesised with different seeds (and re-rolled ones) must sound like ONE speaker.
     # Pull each sentence's pitch (unintended deviation only: planned pitch shifts are applied later) and long-term spectrum toward the
     # take's own median. Small, bounded corrections; skipped for short sentences where the estimates are unreliable.
-    timbre = {"f0_spread_before": None, "f0_spread_after": None, "band_before": None, "band_after": None, "pitch_fixed": [], "eq_fixed": []}
+    timbre = {"band_before": None, "band_after": None, "pitch_fixed": [], "eq_fixed": []}
     long_ix = [i for i, w in enumerate(enh_waves) if len(w) >= 1.5 * audio.SR]
     if len(long_ix) >= 3:
         f0s = {i: _f0_median_st(enh_waves[i]) for i in long_ix}
         have = [i for i in long_ix if f0s[i] is not None]
-        if len(have) >= 3:
-            med_f0 = float(np.median([f0s[i] for i in have]))
-            timbre["f0_spread_before"] = round(float(np.std([f0s[i] - med_f0 for i in have])), 2)
-            for i in have:
-                dev = f0s[i] - med_f0
-                if abs(dev) > 0.8:
+        a0 = qc.f0_assess([f0s[i] for i in have], ref_f0)
+        timbre["f0_assess_before"] = {k: a0[k] for k in ("mode", "n", "spread", "limit", "ok")}
+        if a0["mode"] != "insufficient":
+            centre = a0["center"]
+            for j, i in enumerate(have):
+                dev = f0s[i] - centre
+                # spread mode: pull toward the take median; anchor mode: only correct a sentence clearly away from the reference pitch
+                if (a0["mode"] == "spread" and abs(dev) > 0.8) or (a0["mode"] == "anchor" and abs(dev) > qc.F0_ANCHOR_LIMIT - 0.5):
                     shift = float(np.clip(-dev * 0.8, -1.2, 1.2))
                     try:
                         enh_waves[i] = audio.ffmpeg_wave(enh_waves[i], audio.pitch_chain(0.0, shift) or "anull")
@@ -363,9 +403,8 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
                     except Exception:
                         pass
             f2 = [_f0_median_st(enh_waves[i]) for i in have]
-            f2 = [x for x in f2 if x is not None]
-            if len(f2) >= 3:
-                timbre["f0_spread_after"] = round(float(np.std(np.array(f2) - np.median(f2))), 2)
+            a1 = qc.f0_assess(f2, ref_f0)
+            timbre["f0_assess_after"] = {k: a1[k] for k in ("mode", "n", "spread", "limit", "ok")}
         bands = {i: audio._band_levels(enh_waves[i], audio.SR) for i in long_ix}
         mid = [k for k, (c, _) in enumerate(audio._EQ_BANDS) if c in (500, 1000)]
         norm_b = {i: b - b[mid].mean() for i, b in bands.items()}
@@ -515,30 +554,49 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
             f"تفاوت تشابه البصمة بين الجمل {spread:.2f} (الحد 0.25)" + (f" · أُعيدت: {', '.join(qc_notes['fixed'])}" if qc_notes["fixed"] else ""))
     else:
         add("identity", "ثبات هوية الراوي بين الجمل", "skipped", "نموذج البصمة غير متاح أو الجمل قصيرة")
-    # processing transparency: the master must still be the same voice as the unprocessed mix (no identity/tone damage)
+    # processing transparency: the master must still be the same voice, only polished. INTENDED tonal change (reference-matching EQ,
+    # persona/warmth/clarity filters actually present in the chain) is separated from UNWANTED change; artefacts that speaker similarity
+    # cannot see (muffling, hiss, clipping, crushed dynamics, added reverb) are checked explicitly. Similarity alone is never the verdict.
     try:
         mi = np.asarray(mix, dtype=np.float32)               # the unmastered mix kept in memory (the file is removed after mastering)
         n_ = min(len(mi), len(mw))
-        td = _cleanup._tonal_distance(mi[:n_], mw[:n_])
-        sp_pm = speaker.similarity(refaudio.audio_resample16(mi[:n_ ][: 24000 * 20]), refaudio.audio_resample16(mw[:n_][: 24000 * 20])) if speaker.available() else None
-        ok_pm = td <= 3.0 and (sp_pm is None or sp_pm >= 0.9)
-        add("mastering", "المعالجة لم تغيّر طبيعة الصوت", "ok" if ok_pm else "warn",
-            f"فرق الطيف قبل/بعد الماستر {td:.2f} dB (الحد 3.0)" + (f" · تطابق البصمة {sp_pm:.2f} (الحد 0.90)" if sp_pm is not None else ""))
-    except Exception:
-        add("mastering", "المعالجة لم تغيّر طبيعة الصوت", "skipped", "تعذّر القياس")
-    if timbre["f0_spread_before"] is not None:
-        fa = timbre["f0_spread_after"] if timbre["f0_spread_after"] is not None else timbre["f0_spread_before"]
-        add("pitch", "ثبات طبقة الصوت بين الجمل", "ok" if fa <= 1.5 else "warn",
-            f"انحراف النغمة بين الجمل {timbre['f0_spread_before']} ← {fa} نصف نغمة (الحد 1.5؛ بعض التفاوت طبيعي مع اختلاف المعنى)" + (f" · صُحّحت {len(timbre['pitch_fixed'])} جملة" if timbre["pitch_fixed"] else ""))
+        sp_pm = None
+        if speaker.available():
+            sp_pm = speaker.similarity(refaudio.audio_resample16(mi[:n_][: 24000 * 20]), refaudio.audio_resample16(mw[:n_][: 24000 * 20]))
+        i_mean, i_max = qc.chain_intent(af)
+        ref_arr = None
+        if plan.get("lock_identity"):
+            try:
+                r0_, _t, _s = voices.reference_for(v, plan["dialect"], None)
+                ref_arr, rsr_ = sf.read(str(r0_), dtype="float32")
+                ref_arr = ref_arr if ref_arr.ndim == 1 else ref_arr[:, 0]
+                if rsr_ != audio.SR:
+                    ref_arr = np.interp(np.linspace(0, len(ref_arr) - 1, int(len(ref_arr) * audio.SR / rsr_)), np.arange(len(ref_arr)), ref_arr).astype(np.float32)
+            except Exception:
+                ref_arr = None
+        tr = qc.transparency(mi[:n_], mw[:n_], ref=ref_arr, intended_db=i_mean, intended_max_db=i_max, sim=sp_pm)
+        add("mastering", "المعالجة لم تغيّر طبيعة الصوت", "ok" if tr["ok"] else "warn",
+            ("سليمة: " if tr["ok"] else "تحذير: " + "؛ ".join(tr["reasons"]) + " — ") +
+            f"تغيّر الجرس {tr['tonal_change_db']} dB (المقصود {tr['intended_db']})"
+            + (f" · تطابق البصمة {tr['speaker_sim']}" if "speaker_sim" in tr else ""), transparency=tr)
+    except Exception as e:
+        add("mastering", "المعالجة لم تغيّر طبيعة الصوت", "skipped", f"تعذّر القياس ({type(e).__name__})")
+    fa_b, fa_a = timbre.get("f0_assess_before"), timbre.get("f0_assess_after")
+    if fa_a and fa_a["mode"] != "insufficient":
+        what = (f"انحراف النغمة القوي (MAD) بين {fa_a['n']} جملة {fa_b['spread']} ← {fa_a['spread']} نصف نغمة (الحد {fa_a['limit']})"
+                if fa_a["mode"] == "spread" else
+                f"عيّنة صغيرة ({fa_a['n']} جمل): لا يصح حساب انحراف بينها، فقُورنت كل جملة بنغمة مقطعك المرجعي — أبعد جملة {fa_a['spread']} نصف نغمة (الحد {fa_a['limit']})")
+        add("pitch", "ثبات طبقة الصوت بين الجمل", "ok" if fa_a["ok"] else "warn",
+            what + (f" · صُحّحت {len(timbre['pitch_fixed'])} جملة" if timbre["pitch_fixed"] else ""), pitch_stats=fa_a)
     else:
-        add("pitch", "ثبات طبقة الصوت بين الجمل", "skipped", "الجمل قصيرة أو قليلة")
+        add("pitch", "ثبات طبقة الصوت بين الجمل", "skipped", "لا جمل كافية لقياس موثوق للنغمة")
     if timbre["band_before"] is not None:
         add("tone", "ثبات جرس الصوت بين الجمل", "ok" if timbre["band_after"] <= 1.5 else "warn",
             f"فرق الطيف بين الجمل {timbre['band_before']} ← {timbre['band_after']} dB (الحد 1.5)" + (f" · عُدّلت {len(timbre['eq_fixed'])} جملة" if timbre["eq_fixed"] else ""))
     else:
         add("tone", "ثبات جرس الصوت بين الجمل", "skipped", "الجمل قصيرة أو قليلة")
     st_all = "fail" if any(c["status"] == "fail" for c in checks) else ("warn" if any(c["status"] == "warn" for c in checks) else "ok")
-    qc_report = {"status": st_all, "checks": checks, "fixed_sentences": qc_notes["fixed"], "unresolved_sentences": qc_notes["unresolved"],
+    qc_report = {"status": st_all, "checks": checks, "fixed_sentences": qc_notes["fixed"], "unresolved_sentences": qc_notes["unresolved"], "repair_attempts": qc_notes.get("attempts", 0),
                  "rate_cv": {"before": cv_before, "after": cv_after}, "timbre": timbre, "draft": bool(draft)}
     took = time.time() - t0
     secs = m_master["duration_s"]
@@ -555,7 +613,7 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
             "metrics": {"before": m_raw, "after": m_master}, "profile": profile, "mastering": af, "ref_eq": ref_eq,
             "device": ENGINE.device if ENGINE.device != "uninitialised" else ENGINE.pick_device(),
             "engine": engine, "dialect_native": dcfg["native"], "dialect_note": dcfg["note"],
-            "warnings": warnings, "took_s": round(took, 1), "realtime_factor": round(took / max(secs, 0.1), 1),
+            "draft": bool(draft), "warnings": warnings, "took_s": round(took, 1), "realtime_factor": round(took / max(secs, 0.1), 1),
             "cache_hits": cache_hits}
     if take.get("voice_match") is not None:
         take["voice_match"]["final"] = final_match
@@ -604,6 +662,14 @@ def take_file(take_id: str, name: str) -> Path:
     if not p.is_file():
         raise RenderError("الملف غير موجود.")
     return p
+
+
+def finalize(take_id: str, *, progress=None, synth_fn=default_synth) -> dict:
+    """Turn a DRAFT into a deliverable take: same plan and seeds (sentences come from the cache), but with the full quality
+    pipeline — verification-gated diacritics, QC repairs/re-rolls, harmonisation. A draft is never exported as final without this."""
+    old = load_take(take_id)
+    plan = json.loads(json.dumps(old["plan"]))
+    return render(plan, progress=progress, synth_fn=synth_fn, parent=take_id, draft=False)
 
 
 def regenerate(take_id: str, segment_id: str, *, edits: dict | None = None, new_seed: bool = True,
