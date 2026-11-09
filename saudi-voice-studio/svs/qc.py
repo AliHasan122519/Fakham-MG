@@ -99,3 +99,26 @@ def word_diff(target: str, heard: str) -> dict:
 
 def status(ok: bool, warn_only: bool = False) -> str:
     return "ok" if ok else ("warn" if warn_only else "fail")
+
+
+def pause_noise_db(x: np.ndarray) -> float | None:
+    """Noise level in genuine low-level pauses: runs ≥150 ms whose level is 35-70 dB under the speech peak (digital silence and the
+    short fade edges of syllables are ignored). None when the audio has no such pause (nothing measurable)."""
+    fr = _frames(x, 10.0)
+    if len(fr) < 40:
+        return None
+    r = np.sqrt((fr ** 2).mean(axis=1))
+    lv = _db(r)
+    peak = lv.max()
+    cand = (lv < peak - 35) & (lv > peak - 75) & (r > 1e-6)
+    vals, run = [], []
+    for i, c in enumerate(cand):
+        if c:
+            run.append(lv[i])
+        else:
+            if len(run) >= 15:
+                vals.append(float(np.median(run)))
+            run = []
+    if len(run) >= 15:
+        vals.append(float(np.median(run)))
+    return float(np.median(vals)) if vals else None

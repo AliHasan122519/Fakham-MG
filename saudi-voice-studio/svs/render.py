@@ -20,6 +20,7 @@ import numpy as np
 import soundfile as sf
 
 from . import asr, audio, config, expressive, history, plan as planmod, qc, refaudio, speaker, voices
+from . import clean as _cleanup
 from .engine import ENGINE
 
 CACHE = config.DATA / "cache"
@@ -112,6 +113,15 @@ def _nfe(voice: dict, add: int) -> int:
     if ENGINE.pick_device() == "cpu":
         return 16        # CPU: ~10x slower than real time already; 32 steps would double that
     return int(voice.get("nfe_step", 32)) + int(add)
+
+
+def _f0_median_st(w: np.ndarray) -> float | None:
+    """Median pitch of a sentence in semitones re (100 Hz); None when too few voiced frames."""
+    try:
+        f0 = audio._f0_track(refaudio.audio_resample16(np.asarray(w, dtype=np.float32)))
+    except Exception:
+        return None
+    return float(np.median(12 * np.log2(f0 / 100.0))) if len(f0) >= 25 else None
 
 
 def _process_segment(w: np.ndarray, params: dict, fx: dict) -> np.ndarray:
@@ -318,6 +328,50 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
                     f = 1.0
             after.append(n_ * f)
         cv_after = round(float(np.std(after) / np.mean(after)), 3)
+    # timbre/pitch harmonisation: sentences synthesised with different seeds (and re-rolled ones) must sound like ONE speaker.
+    # Pull each sentence's pitch (unintended deviation only: planned pitch shifts are applied later) and long-term spectrum toward the
+    # take's own median. Small, bounded corrections; skipped for short sentences where the estimates are unreliable.
+    timbre = {"f0_spread_before": None, "f0_spread_after": None, "band_before": None, "band_after": None, "pitch_fixed": [], "eq_fixed": []}
+    long_ix = [i for i, w in enumerate(enh_waves) if len(w) >= 1.5 * audio.SR]
+    if len(long_ix) >= 3:
+        f0s = {i: _f0_median_st(enh_waves[i]) for i in long_ix}
+        have = [i for i in long_ix if f0s[i] is not None]
+        if len(have) >= 3:
+            med_f0 = float(np.median([f0s[i] for i in have]))
+            timbre["f0_spread_before"] = round(float(np.std([f0s[i] - med_f0 for i in have])), 2)
+            for i in have:
+                dev = f0s[i] - med_f0
+                if abs(dev) > 0.8:
+                    shift = float(np.clip(-dev * 0.8, -1.2, 1.2))
+                    try:
+                        enh_waves[i] = audio.ffmpeg_wave(enh_waves[i], audio.pitch_chain(0.0, shift) or "anull")
+                        timbre["pitch_fixed"].append({"id": segs[i]["id"], "dev_st": round(dev, 2), "shift_st": round(shift, 2)})
+                    except Exception:
+                        pass
+            f2 = [_f0_median_st(enh_waves[i]) for i in have]
+            f2 = [x for x in f2 if x is not None]
+            if len(f2) >= 3:
+                timbre["f0_spread_after"] = round(float(np.std(np.array(f2) - np.median(f2))), 2)
+        bands = {i: audio._band_levels(enh_waves[i], audio.SR) for i in long_ix}
+        mid = [k for k, (c, _) in enumerate(audio._EQ_BANDS) if c in (500, 1000)]
+        norm_b = {i: b - b[mid].mean() for i, b in bands.items()}
+        target = np.median(np.stack(list(norm_b.values())), axis=0)
+        timbre["band_before"] = round(float(np.mean([np.abs(norm_b[i] - target).mean() for i in long_ix])), 2)
+        for i in long_ix:
+            diff = target - norm_b[i]
+            fl = []
+            for (c, q), d_ in zip(audio._EQ_BANDS, diff):
+                g_ = float(np.clip(d_ * 0.7, -2.5, 2.5))
+                if abs(g_) >= 0.4:
+                    fl.append(f"equalizer=f={c}:t=q:w={q}:g={g_:.1f}")
+            if fl:
+                try:
+                    enh_waves[i] = audio.ffmpeg_wave(enh_waves[i], ",".join(fl))
+                    timbre["eq_fixed"].append(segs[i]["id"])
+                except Exception:
+                    pass
+        after_b = {i: (lambda b: b - b[mid].mean())(audio._band_levels(enh_waves[i], audio.SR)) for i in long_ix}
+        timbre["band_after"] = round(float(np.mean([np.abs(after_b[i] - target).mean() for i in long_ix])), 2)
     for i, s in enumerate(segs):
         proc_clips.append(_process_segment(enh_waves[i], s["params"], v.get("fx") or {}))
         seg_meta[i]["seconds"] = round(len(proc_clips[-1]) / audio.SR, 2)
@@ -347,6 +401,8 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
     audio.write_wav(d / "raw_in.wav", base_raw)
     # --- AFTER: processed sentences, planned pauses, adaptive master
     mix = _assemble(proc_clips, pauses)
+    # final cleanup is a standard stage: measured, applied only where needed, guarded (see svs/clean.py)
+    mix, clean_rep = _cleanup.polish(mix, force_denoise=bool(plan["controls"].get("denoise")))
     audio.write_wav(d / "mix_in.wav", mix)
     progress(0.90, "المعالجة الصوتية النهائية")
     profile = audio.spectral_profile(mix)
@@ -408,14 +464,15 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
     tp = m_master.get("true_peak_db")
     add("clipping", "التقطيع والتشويه", "ok" if (clipped == 0 and (tp is None or tp <= -1.0)) else "fail",
         f"ذروة {tp} dBTP · عيّنات مقصوصة {clipped * 100:.3f}%")
-    nf = [qc.noise_floor_db(w) for w in enh_waves]
-    nfv = [x for x in nf if x is not None]
-    add("noise", "الضوضاء والوشوشة", "ok" if (not nfv or max(nfv) <= -45) else "warn",
-        f"أعلى أرضية ضجيج بين الجمل {round(max(nfv), 1) if nfv else '—'} dBFS (الحد −45)")
-    rt = [qc.reverb_tail_db(w) for w in enh_waves]
-    rtv = [x for x in rt if x is not None]
-    add("reverb", "الصدى والارتداد", "ok" if (not rtv or float(np.median(rtv)) <= -20) else "warn",
-        f"ذيل ما بعد الكلام {round(float(np.median(rtv)), 1) if rtv else '—'} dB (الجاف ≲ −20)" + ("" if C.get("reverb", 0) == 0 else " · أُضيف صدى بطلبك"))
+    nfv = qc.pause_noise_db(mw)
+    cl_note = (" · عولج تلقائيًا: " + "، ".join(clean_rep["applied"])) if clean_rep["applied"] else ""
+    add("noise", "الضوضاء والوشوشة", "ok" if (nfv is None or nfv <= -50) else "warn",
+        (f"ضجيج الوقفات {round(nfv, 1)} dBFS (الحد −50)" if nfv is not None else "لا توجد وقفات منخفضة تُقاس (الأرضية رقمية/نظيفة)") + cl_note,
+        cleanup=clean_rep)
+    rtv = qc.reverb_tail_db(mw)
+    add("reverb", "الصدى والارتداد", "ok" if (rtv is None or rtv <= -26 or C.get("reverb", 0) > 0) else "warn",
+        f"ذيل ما بعد الكلام {round(rtv, 1) if rtv is not None else '—'} dB (الجاف ≲ −26)"
+        + ("" if C.get("reverb", 0) == 0 else " · أُضيف صدى بطلبك") + (cl_note if "الصدى" in cl_note else ""))
     rms_resid = [audio.active_rms_db(c) - float(s["params"]["gain_db"]) for c, s in zip(proc_clips, segs)]
     sd = float(np.std(rms_resid)) if len(rms_resid) > 1 else 0.0
     add("level", "ثبات مستوى الصوت بين الجمل", "ok" if sd <= 1.2 else "warn", f"الانحراف {sd:.2f} dB بعد استبعاد الجهارة المخططة (الحد 1.2)")
@@ -444,9 +501,20 @@ def render(plan_in: dict, *, fmt: str = "both", progress: Callable[[float, str],
             f"تفاوت تشابه البصمة بين الجمل {spread:.2f} (الحد 0.25)" + (f" · أُعيدت: {', '.join(qc_notes['fixed'])}" if qc_notes["fixed"] else ""))
     else:
         add("identity", "ثبات هوية الراوي بين الجمل", "skipped", "نموذج البصمة غير متاح أو الجمل قصيرة")
+    if timbre["f0_spread_before"] is not None:
+        fa = timbre["f0_spread_after"] if timbre["f0_spread_after"] is not None else timbre["f0_spread_before"]
+        add("pitch", "ثبات طبقة الصوت بين الجمل", "ok" if fa <= 1.0 else "warn",
+            f"انحراف النغمة بين الجمل {timbre['f0_spread_before']} ← {fa} نصف نغمة (الحد 1.0)" + (f" · صُحّحت {len(timbre['pitch_fixed'])} جملة" if timbre["pitch_fixed"] else ""))
+    else:
+        add("pitch", "ثبات طبقة الصوت بين الجمل", "skipped", "الجمل قصيرة أو قليلة")
+    if timbre["band_before"] is not None:
+        add("tone", "ثبات جرس الصوت بين الجمل", "ok" if timbre["band_after"] <= 1.5 else "warn",
+            f"فرق الطيف بين الجمل {timbre['band_before']} ← {timbre['band_after']} dB (الحد 1.5)" + (f" · عُدّلت {len(timbre['eq_fixed'])} جملة" if timbre["eq_fixed"] else ""))
+    else:
+        add("tone", "ثبات جرس الصوت بين الجمل", "skipped", "الجمل قصيرة أو قليلة")
     st_all = "fail" if any(c["status"] == "fail" for c in checks) else ("warn" if any(c["status"] == "warn" for c in checks) else "ok")
     qc_report = {"status": st_all, "checks": checks, "fixed_sentences": qc_notes["fixed"], "unresolved_sentences": qc_notes["unresolved"],
-                 "rate_cv": {"before": cv_before, "after": cv_after}}
+                 "rate_cv": {"before": cv_before, "after": cv_after}, "timbre": timbre}
     took = time.time() - t0
     secs = m_master["duration_s"]
     if intel and all(v < 0.3 for v in intel.values()) and len(intel) == len(segs):

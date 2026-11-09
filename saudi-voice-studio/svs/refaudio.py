@@ -219,6 +219,34 @@ def guarded_clean(x: np.ndarray, rep: dict, transcript: str | None) -> tuple[np.
     return base, g
 
 
+def guarded_dereverb(x: np.ndarray, transcript: str | None) -> tuple[np.ndarray, dict]:
+    """Late-reverberation suppression on a reference clip, kept only if it provably helps and does not hurt the voice
+    (tail drops ≥3 dB, tonal balance within 2 dB, ASR match not worse by more than 0.08)."""
+    from . import clean as _clean, qc as _qc
+    g: dict = {"applied": False, "tail_before": None, "tail_after": None, "t60": None}
+    t0 = _qc.reverb_tail_db(x)
+    g["tail_before"] = None if t0 is None else round(t0, 1)
+    if t0 is None or t0 <= _clean.REVERB_APPLY_DB:
+        return x, g
+    t60 = _clean.estimate_t60(x) or 0.45
+    g["t60"] = round(t60, 2)
+    cand = level(_clean.dereverb(x, t60))
+    t1 = _qc.reverb_tail_db(cand)
+    g["tail_after"] = None if t1 is None else round(t1, 1)
+    dist = _clean._tonal_distance(x, cand)
+    g["tonal_distance_db"] = round(dist, 2)
+    ok = t1 is not None and t1 < t0 - 3 and dist <= 2.0
+    if ok and transcript and asr.available():
+        sb = asr.similarity(transcript, asr.transcribe(audio_resample16(x))["text"])
+        sa = asr.similarity(transcript, asr.transcribe(audio_resample16(cand))["text"])
+        g["asr_before"], g["asr_after"] = round(sb, 3), round(sa, 3)
+        ok = sa >= sb - 0.08
+    if ok:
+        g["applied"] = True
+        return cand, g
+    return x, g
+
+
 # ------------------------------------------------------------------ verdict
 def verdict(rep: dict, speech_s: float) -> dict:
     """status: ok | warn | reject, with Arabic reasons and tips."""
@@ -302,6 +330,15 @@ def analyze_upload(src: Path, transcript: str = "", *, use_asr: bool = True) -> 
                    note="اقتُطع المقطع عند حدّ كلمة ونصه مُفرَّغ آليًا للجزء المقصوص — راجعه.")
     clip_rep = analyse(clip)
     cleaned, guard = guarded_clean(clip, clip_rep, transcript if transcript else None)
+    cleaned, guard["dereverb"] = guarded_dereverb(cleaned, transcript if transcript else None)
+    if guard["dereverb"].get("tail_before") is not None and guard["dereverb"]["tail_before"] > -26:
+        msg = (f"المقطع فيه صدى غرفة (ذيل {guard['dereverb']['tail_before']} dB)؛ النموذج يستنسخ الصدى مع الصوت. "
+               + ("عالجتُه تلقائيًا وتأكدتُ أن الصوت لم يتأثر." if guard["dereverb"].get("applied") else
+                  "لم أستطع معالجته بأمان؛ الأفضل تسجيل المقطع في غرفة مفروشة أو قرب الميكروفون."))
+        if v["status"] == "ok":
+            v["status"] = "warn"
+        v["warn"].append(msg)
+        v["messages"] = v["reject"] + v["warn"]
     res["guard"] = guard
     # --- transcript ↔ audio verification (the guard against garbled output)
     if asr_ok:
