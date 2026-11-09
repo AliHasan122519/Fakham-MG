@@ -1,0 +1,16 @@
+{"run": 1, "ok": true, "error": null, "seconds": 282.8, "ram_gb": 4.22, "threads": 21, "open_files": 4, "audio_s": 11.27, "qc": "ok", "asr_min": 0.966, "regenerated": false, "take_mb": 2.4}
+{"run": 2, "ok": true, "error": null, "seconds": 224.6, "ram_gb": 4.21, "threads": 24, "open_files": 3, "audio_s": 8.8, "qc": "warn", "asr_min": 0.971, "regenerated": true, "take_mb": 2.0}
+{"run": 3, "ok": true, "error": null, "seconds": 175.4, "ram_gb": 4.29, "threads": 24, "open_files": 4, "audio_s": 10.55, "qc": "ok", "asr_min": 1.0, "regenerated": false, "take_mb": 2.3}
+{"run": 4, "ok": true, "error": null, "seconds": 207.8, "ram_gb": 4.4, "threads": 24, "open_files": 6, "audio_s": 9.32, "qc": "ok", "asr_min": 0.982, "regenerated": true, "take_mb": 2.0}
+{"run": 5, "ok": true, "error": null, "seconds": 183.3, "ram_gb": 4.34, "threads": 24, "open_files": 7, "audio_s": 9.06, "qc": "ok", "asr_min": 1.0, "regenerated": false, "take_mb": 2.1}
+{"run": 6, "ok": true, "error": null, "seconds": 255.1, "ram_gb": 4.35, "threads": 24, "open_files": 9, "audio_s": 10.41, "qc": "warn", "asr_min": 0.962, "regenerated": true, "take_mb": 2.2}
+{
+ "runs": 6,
+ "failed": 0,
+ "qc_fail": 0,
+ "ram_growth_gb_after_warmup": 0.14,
+ "threads_growth": 0,
+ "open_files_growth": 6,
+ "time_per_audio_second_first_vs_last": [
+ "verdict": "يحتاج مراجعة"
+}

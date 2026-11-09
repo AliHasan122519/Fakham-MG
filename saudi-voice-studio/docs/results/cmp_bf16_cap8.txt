@@ -1,0 +1,7 @@
+{"i": 0, "chars": 30, "audio_s": 2.56, "synth_s": 36.0, "rtf": 14.06, "ram_before": 0.103, "ram_after": 2.932, "ram_released": 2.359, "asr": 0.966, "spk": 0.646, "f0_st": 10.15}
+{"i": 1, "chars": 70, "audio_s": 6.08, "synth_s": 45.9, "rtf": 7.55, "ram_before": 3.245, "ram_after": 3.65, "ram_released": 2.841, "asr": 0.971, "spk": 0.72, "f0_st": 4.98}
+{"i": 2, "chars": 5, "audio_s": 1.41, "synth_s": 23.5, "rtf": 16.66, "ram_before": 3.178, "ram_after": 3.604, "ram_released": 2.845, "asr": 0.75, "spk": 0.393, "f0_st": null}
+{"i": 3, "chars": 37, "audio_s": 3.26, "synth_s": 27.6, "rtf": 8.45, "ram_before": 3.196, "ram_after": 3.684, "ram_released": 2.854, "asr": 1.0, "spk": 0.649, "f0_st": 7.46}
+{"i": 4, "chars": 65, "audio_s": 5.65, "synth_s": 38.3, "rtf": 6.78, "ram_before": 3.238, "ram_after": 3.694, "ram_released": 2.857, "asr": 0.976, "spk": 0.774, "f0_st": 8.93}
+{"i": 5, "chars": 33, "audio_s": 2.84, "synth_s": 26.3, "rtf": 9.25, "ram_before": 3.285, "ram_after": 3.61, "ram_released": 2.859, "asr": 0.968, "spk": 0.644, "f0_st": 12.0}
+SUMMARY bf16_cap8 {"rtf_mean": 10.46, "asr_mean": 0.939, "spk_mean": 0.638, "ram_start": 0.103, "ram_end_released": 2.859, "ram_peak": 3.694}
