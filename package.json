@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "gsap": "^3.15.1",
+    "howler": "^2.2.4",
+    "reveal.js": "^6.0.2",
+    "three": "^0.187.0"
+  }
+}
