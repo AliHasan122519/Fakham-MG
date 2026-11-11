@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>عرض تفاعلي</title>
+<link rel="stylesheet" href="/node_modules/reveal.js/dist/reset.css">
+<link rel="stylesheet" href="/node_modules/reveal.js/dist/reveal.css">
+<link rel="stylesheet" href="/node_modules/reveal.js/dist/theme/black.css">
+<style>
+  .reveal { font-family: 'Segoe UI', Tahoma, 'Noto Naskh Arabic', sans-serif; }
+  .btn { font-size: 1.1em; padding: .5em 1.2em; margin: .3em; border: 0; border-radius: .6em; background: #38bdf8; color: #04111c; cursor: pointer; min-height: 48px; min-width: 48px; }
+  .btn.ok { background: #4ade80; } .btn.bad { background: #f87171; }
+  #mute { position: fixed; top: 10px; left: 10px; z-index: 50; }
+  #feedback { min-height: 1.5em; margin-top: .5em; }
+</style>
+</head>
+<body>
+<button id="mute" class="btn" aria-pressed="false">🔊</button>
+<div class="reveal"><div class="slides">
+  <section id="s-intro"><h1 class="anim">مرحباً بكم</h1><p>اسحب بإصبعك أو اضغط الأسهم للتنقل</p>
+    <button class="btn" id="start">ابدأ</button></section>
+  <section id="s-counter"><h2>عدّاد تفاعلي</h2><div style="font-size:3em" id="count">0</div>
+    <button class="btn" id="inc">+1</button><button class="btn" id="reset">إعادة</button></section>
+  <section id="s-quiz"><h2>سؤال: كم ناتج 7 × 6؟</h2>
+    <div id="opts"><button class="btn" data-a="36">36</button><button class="btn" data-a="42">42</button><button class="btn" data-a="48">48</button></div>
+    <div id="feedback" role="status"></div></section>
+  <section id="s-end"><h2>شكراً لكم</h2><button class="btn" id="again">العودة للبداية</button></section>
+</div></div>
+<script src="/node_modules/howler/dist/howler.min.js"></script>
+<script src="/node_modules/gsap/dist/gsap.min.js"></script>
+<script src="/shared/sfx.js"></script>
+<script src="/node_modules/reveal.js/dist/reveal.js"></script>
+<script>
+const deck = new Reveal({ hash: true, touch: true, rtl: true, controls: true, progress: true, transition: 'slide' });
+deck.initialize().then(() => { window.__ready = true; });
+deck.on('slidechanged', e => { SFX.play('whoosh'); gsap.from(e.currentSlide.children, { y: 30, opacity: 0, stagger: .1, duration: .5 }); });
+const $ = s => document.querySelector(s);
+$('#start').onclick = () => { SFX.play('click'); deck.next(); };
+let n = 0;
+$('#inc').onclick = () => { SFX.play('click'); $('#count').textContent = ++n; gsap.fromTo('#count', { scale: 1.5 }, { scale: 1, duration: .3 }); };
+$('#reset').onclick = () => { SFX.play('click'); n = 0; $('#count').textContent = 0; };
+document.querySelectorAll('#opts .btn').forEach(b => b.onclick = () => {
+  const ok = b.dataset.a === '42';
+  SFX.play(ok ? 'correct' : 'wrong'); b.classList.add(ok ? 'ok' : 'bad');
+  $('#feedback').textContent = ok ? '✅ إجابة صحيحة!' : '❌ حاول مرة أخرى';
+});
+$('#again').onclick = () => { SFX.play('click'); deck.slide(0); };
+let muted = false;
+$('#mute').onclick = e => { muted = !muted; SFX.muted(muted); e.currentTarget.textContent = muted ? '🔇' : '🔊'; e.currentTarget.setAttribute('aria-pressed', muted); };
+</script>
+</body></html>

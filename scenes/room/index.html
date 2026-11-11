@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>مشهد ثلاثي الأبعاد</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0b1020;font-family:'Segoe UI',Tahoma,sans-serif}
+  canvas{display:block;touch-action:none}
+  #ui{position:fixed;bottom:12px;left:0;right:0;display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+  button{font-size:1.1em;min-width:56px;min-height:48px;padding:.4em 1em;border:0;border-radius:.6em;background:#38bdf8;color:#04111c;cursor:pointer}
+</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+</head>
+<body>
+<div id="ui">
+  <button id="zin">تقريب ➕</button><button id="zout">ابتعاد ➖</button>
+  <button id="tour">جولة سينمائية 🎬</button><button id="spin">دوران ⟳</button>
+</div>
+<script src="/node_modules/howler/dist/howler.min.js"></script>
+<script src="/node_modules/gsap/dist/gsap.min.js"></script>
+<script src="/shared/sfx.js"></script>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b1020);
+scene.fog = new THREE.Fog(0x0b1020, 12, 30);
+// إضاءة واقعية: بيئة استوديو + شمس بظلال ناعمة
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+const sun = new THREE.DirectionalLight(0xfff1dd, 3);
+sun.position.set(5, 8, 4); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8 });
+scene.add(sun);
+
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: 0x2b2f3a, roughness: .35, metalness: .2 }));
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+const mk = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial(mat)); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; scene.add(m); return m; };
+const hero = mk(new THREE.TorusKnotGeometry(.8, .28, 200, 32), { color: 0xd4af37, metalness: 1, roughness: .15 }, 0, 1.6, 0);
+mk(new THREE.SphereGeometry(.6, 64, 64), { color: 0x2563eb, metalness: .1, roughness: .05 }, -2.2, .6, 1);
+mk(new THREE.BoxGeometry(1, 1, 1), { color: 0xe5e7eb, metalness: 0, roughness: .8 }, 2.2, .5, .5);
+mk(new THREE.CylinderGeometry(.5, .5, 1.4, 48), { color: 0xdc2626, metalness: .6, roughness: .3 }, 0, .7, -2.5);
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, .1, 100);
+const rig = { r: 8, a: 0.6, h: 3 };      // مدار الكاميرا: نصف القطر والزاوية والارتفاع
+const aim = new THREE.Vector3(0, 1.2, 0);
+function place() {
+  camera.position.set(Math.sin(rig.a) * rig.r, rig.h, Math.cos(rig.a) * rig.r);
+  camera.lookAt(aim);
+}
+let spinning = false;
+renderer.setAnimationLoop(() => { if (spinning) rig.a += .005; hero.rotation.y += .01; place(); renderer.render(scene, camera); });
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+
+const $ = s => document.getElementById(s);
+const zoomTo = r => { SFX.play('whoosh'); gsap.to(rig, { r: Math.min(14, Math.max(3, r)), duration: 1, ease: 'power2.inOut' }); };
+$('zin').onclick = () => zoomTo(rig.r - 2.5);
+$('zout').onclick = () => zoomTo(rig.r + 2.5);
+$('spin').onclick = () => { SFX.play('click'); spinning = !spinning; };
+$('tour').onclick = () => {   // جولة: ابتعاد ثم تقريب مع دوران وارتفاع
+  SFX.play('whoosh'); spinning = false;
+  gsap.timeline({ onComplete: () => { window.__tourDone = true; } })
+    .to(rig, { r: 13, h: 6, duration: 1.2, ease: 'power2.out' })
+    .to(rig, { a: rig.a + Math.PI * 1.5, r: 5, h: 2, duration: 3, ease: 'power1.inOut' })
+    .to(rig, { r: 3.2, h: 1.8, duration: 1.2, ease: 'power3.in' })
+    .to(rig, { r: 8, h: 3, duration: 1.2, ease: 'power2.out' });
+};
+window.__rig = rig; window.__sceneReady = true;
+</script>
+</body></html>

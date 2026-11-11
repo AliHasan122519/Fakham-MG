@@ -2,7 +2,20 @@
   "dependencies": {
     "gsap": "^3.15.1",
     "howler": "^2.2.4",
+    "pptxgenjs": "^4.0.1",
     "reveal.js": "^6.0.2",
     "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  },
+  "type": "module",
+  "private": true,
+  "name": "fakham-mg",
+  "scripts": {
+    "serve": "node server.mjs",
+    "gen:sounds": "node scripts/gen-sounds.mjs",
+    "gen:pptx": "node scripts/make-pptx.mjs",
+    "test": "playwright test --trace off"
   }
 }

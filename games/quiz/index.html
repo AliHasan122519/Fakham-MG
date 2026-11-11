@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>لعبة المراحل التعليمية</title>
+<style>
+  body { margin:0; font-family: 'Segoe UI', Tahoma, sans-serif; background: linear-gradient(160deg,#0f172a,#1e3a8a); color:#fff; min-height:100vh; display:flex; align-items:center; justify-content:center; touch-action: manipulation; }
+  main { width:min(92vw,560px); text-align:center; }
+  .hud { display:flex; justify-content:space-between; font-size:1.1em; margin-bottom:1em; }
+  .q { font-size:2em; margin:.8em 0; }
+  button { font-size:1.3em; margin:.35em; padding:.6em 1.4em; min-width:88px; min-height:56px; border:0; border-radius:.7em; background:#38bdf8; color:#04111c; cursor:pointer; }
+  button.ok { background:#4ade80; } button.bad { background:#f87171; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <section id="menu"><h1>🎮 تحدّي المراحل</h1><p>٣ مراحل — لديك ٣ قلوب</p><button id="play">ابدأ اللعب</button></section>
+  <section id="game" hidden>
+    <div class="hud"><span id="level">المرحلة 1</span><span id="score">النقاط: 0</span><span id="lives">❤❤❤</span></div>
+    <div class="q" id="q"></div><div id="answers"></div>
+  </section>
+  <section id="over" hidden><h1 id="result"></h1><p id="final"></p><button id="retry">العب مجدداً</button></section>
+</main>
+<script src="/node_modules/howler/dist/howler.min.js"></script>
+<script src="/node_modules/gsap/dist/gsap.min.js"></script>
+<script src="/shared/sfx.js"></script>
+<script>
+const LEVELS = [
+  [['2 + 3','5',['4','5','6']],['4 + 4','8',['7','8','9']]],
+  [['3 × 4','12',['10','12','14']],['5 × 5','25',['20','25','30']]],
+  [['12 ÷ 3','4',['3','4','6']],['9 × 9','81',['72','81','90']]],
+];
+const $ = s => document.querySelector(s);
+const st = { level:0, q:0, score:0, lives:3, locked:false };
+window.__game = st;
+const show = id => ['menu','game','over'].forEach(x => $('#'+x).hidden = x !== id);
+function render() {
+  const [text, , opts] = LEVELS[st.level][st.q];
+  $('#level').textContent = `المرحلة ${st.level+1}`;
+  $('#score').textContent = `النقاط: ${st.score}`;
+  $('#lives').textContent = '❤'.repeat(st.lives);
+  $('#q').textContent = text + ' = ؟';
+  $('#answers').replaceChildren(...opts.map(o => { const b = document.createElement('button'); b.textContent = o; b.dataset.v = o; b.onclick = () => answer(b); return b; }));
+  gsap.from('#q', { scale: .6, opacity: 0, duration: .4 });
+  st.locked = false;
+}
+function end(win) {
+  show('over'); $('#result').textContent = win ? '🏆 فزت!' : '💔 انتهت اللعبة';
+  $('#final').textContent = `النقاط: ${st.score}`; SFX.play(win ? 'levelup' : 'wrong');
+}
+function answer(b) {
+  if (st.locked) return; st.locked = true;
+  const ok = b.dataset.v === LEVELS[st.level][st.q][1];
+  b.classList.add(ok ? 'ok' : 'bad'); SFX.play(ok ? 'correct' : 'wrong');
+  if (ok) st.score += 10; else st.lives--;
+  setTimeout(() => {
+    if (st.lives <= 0) return end(false);
+    if (++st.q >= LEVELS[st.level].length) {
+      st.q = 0;
+      if (++st.level >= LEVELS.length) return end(true);
+      SFX.play('levelup');
+    }
+    render();
+  }, 500);
+}
+function start() { Object.assign(st, { level:0, q:0, score:0, lives:3 }); SFX.play('click'); show('game'); render(); }
+$('#play').onclick = start; $('#retry').onclick = start;
+</script>
+</body></html>
